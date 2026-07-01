@@ -96,28 +96,8 @@ func Run(hosts []Host, opts Options) error {
 	for {
 		select {
 		case ev := <-events:
-			if ev.Type == tui.EventQuit || ev.Rune == 'q' {
+			if handleFleetKey(ev, &list, &interval, ticker, trigger) {
 				return nil
-			}
-			switch {
-			case ev.Key == tui.KeyUp, ev.Rune == 'k':
-				list.Move(-1)
-			case ev.Key == tui.KeyDown, ev.Rune == 'j':
-				list.Move(1)
-			case ev.Key == tui.KeyHome, ev.Rune == 'g':
-				list.Top()
-			case ev.Key == tui.KeyEnd, ev.Rune == 'G':
-				list.Bottom()
-			case ev.Rune == 'r':
-				trigger()
-			case ev.Rune == '+':
-				interval += time.Second
-				ticker.Reset(interval)
-			case ev.Rune == '-':
-				if interval > time.Second {
-					interval -= time.Second
-					ticker.Reset(interval)
-				}
 			}
 			draw()
 		case st := <-results:
@@ -128,6 +108,34 @@ func Run(hosts []Host, opts Options) error {
 			trigger()
 		}
 	}
+}
+
+// handleFleetKey applies one input event to the fleet view. It returns true when
+// the user asked to quit.
+func handleFleetKey(ev tui.Event, list *tui.List, interval *time.Duration, ticker *time.Ticker, trigger func()) bool {
+	switch {
+	case ev.Type == tui.EventQuit, ev.Rune == 'q':
+		return true
+	case ev.Key == tui.KeyUp, ev.Rune == 'k':
+		list.Move(-1)
+	case ev.Key == tui.KeyDown, ev.Rune == 'j':
+		list.Move(1)
+	case ev.Key == tui.KeyHome, ev.Rune == 'g':
+		list.Top()
+	case ev.Key == tui.KeyEnd, ev.Rune == 'G':
+		list.Bottom()
+	case ev.Rune == 'r':
+		trigger()
+	case ev.Rune == '+':
+		*interval += time.Second
+		ticker.Reset(*interval)
+	case ev.Rune == '-':
+		if *interval > time.Second {
+			*interval -= time.Second
+			ticker.Reset(*interval)
+		}
+	}
+	return false
 }
 
 // collectAll dials, collects, and closes every host concurrently.

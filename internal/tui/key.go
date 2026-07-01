@@ -104,6 +104,22 @@ func Decode(b []byte) (Event, int) {
 	return Event{Type: EventKey, Key: KeyRune, Rune: r}, size
 }
 
+// csiFinal maps the final byte of a 3-byte CSI/SS3 sequence (ESC [ X or ESC O X)
+// to its key.
+var csiFinal = map[byte]Key{
+	'A': KeyUp, 'B': KeyDown, 'C': KeyRight, 'D': KeyLeft,
+	'Z': KeyShiftTab, 'H': KeyHome, 'F': KeyEnd,
+}
+
+// csiTilde maps the numeric parameter of an ESC [ N ~ sequence (e.g. Page Up is
+// ESC [ 5 ~) to its key.
+var csiTilde = map[byte]Key{
+	'1': KeyHome, '7': KeyHome,
+	'4': KeyEnd, '8': KeyEnd,
+	'5': KeyPgUp, '6': KeyPgDn,
+	'3': KeyBackspace, // Delete -> treat as backspace
+}
+
 func decodeEscape(b []byte) (Event, int) {
 	if len(b) < 2 {
 		return key(KeyEsc), 1 // lone ESC
@@ -114,35 +130,13 @@ func decodeEscape(b []byte) (Event, int) {
 	if len(b) < 3 {
 		return key(KeyEsc), 1
 	}
-	switch b[2] {
-	case 'A':
-		return key(KeyUp), 3
-	case 'B':
-		return key(KeyDown), 3
-	case 'C':
-		return key(KeyRight), 3
-	case 'D':
-		return key(KeyLeft), 3
-	case 'Z':
-		return key(KeyShiftTab), 3
-	case 'H':
-		return key(KeyHome), 3
-	case 'F':
-		return key(KeyEnd), 3
+	if k, ok := csiFinal[b[2]]; ok {
+		return key(k), 3
 	}
 	// Numeric sequences like ESC [ 5 ~
 	if len(b) >= 4 && b[3] == '~' {
-		switch b[2] {
-		case '1', '7':
-			return key(KeyHome), 4
-		case '4', '8':
-			return key(KeyEnd), 4
-		case '5':
-			return key(KeyPgUp), 4
-		case '6':
-			return key(KeyPgDn), 4
-		case '3': // Delete -> treat as backspace
-			return key(KeyBackspace), 4
+		if k, ok := csiTilde[b[2]]; ok {
+			return key(k), 4
 		}
 		return key(KeyEsc), 4
 	}
