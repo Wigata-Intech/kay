@@ -501,7 +501,7 @@ func pickServer(st *config.Store, alias string) (*config.Server, error) {
 		return st.FindServer(alias)
 	}
 	if len(st.Servers) == 0 {
-		return nil, fmt.Errorf("no servers registered; add one with: kay server add ...")
+		return nil, fmt.Errorf("no servers registered; add one with 'kay server add'")
 	}
 	if len(st.Servers) == 1 {
 		return &st.Servers[0], nil

@@ -597,16 +597,16 @@ func (m *model) openDetail(title, content string) {
 // handleDetailKey drives the scrollable, searchable detail/logs overlay.
 func (m *model) handleDetailKey(ev tui.Event) keyResult {
 	if m.searching {
-		switch {
-		case ev.Key == tui.KeyEnter:
+		switch ev.Key {
+		case tui.KeyEnter:
 			m.runSearch()
 			m.searching = false
-		case ev.Key == tui.KeyEsc:
+		case tui.KeyEsc:
 			m.searching = false
 			m.searchQuery = ""
-		case ev.Key == tui.KeyBackspace:
+		case tui.KeyBackspace:
 			m.searchQuery = trimLastRune(m.searchQuery)
-		case ev.Key == tui.KeyRune:
+		case tui.KeyRune:
 			m.searchQuery += string(ev.Rune)
 		}
 		return keyResult{}
@@ -1092,8 +1092,9 @@ func validID(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-') {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-'
+		if !ok {
 			return false
 		}
 	}

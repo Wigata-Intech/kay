@@ -1,15 +1,18 @@
-# Run locally with: golangci-lint run
-# Not yet a CI gate — wire it into the workflow once it passes cleanly on your
-# machine (linters can flag style issues that weren't caught by go vet).
-run:
-  timeout: 3m
+# golangci-lint v2 config. Runs in CI (the `lint` job) and locally via `make lint`.
+# gosec runs as its own CI job / `make gosec`, so it is intentionally not enabled
+# here (that keeps the //nosec directives authoritative in one place).
+version: "2"
 
 linters:
+  default: none
   enable:
-    - gofmt
+    - staticcheck # includes the old gosimple + stylecheck checks
     - govet
-    - staticcheck
     - ineffassign
     - unused
     - misspell
-    - revive
+    - unconvert
+
+formatters:
+  enable:
+    - gofmt

@@ -91,7 +91,7 @@ func LoadFrom(dir string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{dir: dir, path: filepath.Join(dir, "config.json")}
-	data, err := os.ReadFile(s.path)
+	data, err := os.ReadFile(s.path) //#nosec G304 -- config path is kay-controlled, not untrusted input
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
 	}
