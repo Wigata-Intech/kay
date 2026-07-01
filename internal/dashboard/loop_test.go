@@ -1,0 +1,144 @@
+// White-box: loop is unexported and drives the model's event handling; these
+// tests inject a fake screen and channels to exercise every select arm without a
+// real terminal.
+package dashboard
+
+import (
+	"os"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/Wigata-Intech/kay/internal/tui"
+)
+
+// fakeScreen counts draws; the counter is mutex-guarded because Draw runs in the
+// loop goroutine while the test reads the count. w/h are set once and never
+// mutated, so Size needs no lock.
+type fakeScreen struct {
+	w, h int
+	mu   sync.Mutex
+	n    int
+}
+
+func (s *fakeScreen) Size() (int, int) { return s.w, s.h }
+func (s *fakeScreen) Draw([]string)    { s.mu.Lock(); s.n++; s.mu.Unlock() }
+func (s *fakeScreen) draws() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
+
+// startLoop runs m.loop in a goroutine and returns its channels plus a done
+// channel carrying the loop's return value.
+func startLoop(m *model, scr screen, reset func()) (chan tui.Event, chan os.Signal, chan time.Time, <-chan error) {
+	ev := make(chan tui.Event)
+	sig := make(chan os.Signal)
+	tick := make(chan time.Time)
+	done := make(chan error, 1)
+	go func() { done <- m.loop(scr, ev, sig, tick, reset) }()
+	return ev, sig, tick, done
+}
+
+func TestLoopQuitKey(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   tui.Event
+	}{
+		{name: "q key quits", ev: tui.Event{Rune: 'q'}},
+		{name: "quit event quits", ev: tui.Event{Type: tui.EventQuit}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel()
+			scr := &fakeScreen{w: 100, h: 30}
+			ev, _, _, done := startLoop(m, scr, func() {})
+			ev <- tt.ev
+			if err := <-done; err != nil {
+				t.Errorf("loop returned %v, want nil", err)
+			}
+			if scr.draws() == 0 {
+				t.Error("loop should draw at least once before quitting")
+			}
+		})
+	}
+}
+
+func TestLoopSignalQuit(t *testing.T) {
+	m := newModel()
+	scr := &fakeScreen{w: 100, h: 30}
+	_, sig, _, done := startLoop(m, scr, func() {})
+	sig <- syscall.SIGTERM
+	if err := <-done; err != nil {
+		t.Errorf("loop returned %v, want nil", err)
+	}
+}
+
+func TestLoopResizeThenQuit(t *testing.T) {
+	m := newModel()
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, sig, _, done := startLoop(m, scr, func() {})
+
+	sig <- os.Interrupt // non-quit signal: redraw and keep looping
+	ev <- tui.Event{Rune: 'q'}
+	<-done
+	if got := scr.draws(); got < 2 {
+		t.Errorf("draws = %d, want >= 2 (initial + resize)", got)
+	}
+}
+
+func TestLoopCollectResult(t *testing.T) {
+	m := newModel()
+	m.results = make(chan collectResult) // unbuffered: deterministic hand-off
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, _, done := startLoop(m, scr, func() {})
+
+	m.results <- collectResult{snap: sampleSnap()}
+	ev <- tui.Event{Rune: 'q'}
+	<-done
+	if m.collecting {
+		t.Error("collecting should be cleared after a result")
+	}
+	if got := scr.draws(); got < 2 {
+		t.Errorf("draws = %d, want >= 2 (initial + result)", got)
+	}
+}
+
+// runFunc adapts a function to the Client interface for signaling in tests.
+type runFunc func(string) (string, error)
+
+func (f runFunc) Run(cmd string) (string, error) { return f(cmd) }
+
+func TestLoopTickTriggersCollect(t *testing.T) {
+	m := newModel()
+	m.results = make(chan collectResult, 1) // buffered: absorb the async collect
+	ran := make(chan struct{}, 1)
+	m.client = runFunc(func(string) (string, error) {
+		select {
+		case ran <- struct{}{}:
+		default:
+		}
+		return "", nil
+	})
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, tick, done := startLoop(m, scr, func() {})
+
+	tick <- time.Now()
+	<-ran // a tick must have started a collection (the client was queried)
+	ev <- tui.Event{Rune: 'q'}
+	<-done
+}
+
+func TestLoopIntervalChangeResetsTick(t *testing.T) {
+	m := newModel()
+	scr := &fakeScreen{w: 100, h: 30}
+	resets := 0
+	ev, _, _, done := startLoop(m, scr, func() { resets++ })
+
+	ev <- tui.Event{Rune: '+'} // grow interval -> intervalChanged -> resetTick
+	ev <- tui.Event{Rune: 'q'}
+	<-done
+	if resets != 1 {
+		t.Errorf("resetTick calls = %d, want 1", resets)
+	}
+	if m.interval <= 3*time.Second {
+		t.Errorf("interval = %v, want > 3s after '+'", m.interval)
+	}
+}

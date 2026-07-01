@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-01
+
+Internal cleanup: no behavior change and no new features. Reduces duplication,
+splits an oversized file, tightens package seams, and makes the interactive code
+testable (total coverage 66.9% → 73.7%).
+
+### Changed
+
+- **Shared UI helpers** — moved the duplicated `setColor`, `clampAll`,
+  `firstLine`, and colour-threshold logic out of `dashboard` and `fleet` into the
+  `tui` toolkit (`SetColorMode`, `ClampAll`, `FirstLine`, `ThreshColor`). No
+  behavior change; both views now share one source of truth for colour and
+  layout.
+- **Split `dashboard.go`** — the 1200-line file is now four focused files in the
+  same package: `dashboard.go` (lifecycle + data), `input.go` (keys/actions),
+  `render.go` (view builders), and `format.go` (pure formatting helpers). Pure
+  code move, no behavior change.
+- **Unified the SSH seam** — `dashboard.Client` is now an alias of
+  `metrics.Runner`, so the dashboard and the metrics collector share one
+  interface instead of two identical copies.
+- **Split `tui.List` into `List` + `Pager`** — the selectable list and the
+  scrollable overlay were one dual-mode type gated by a `selectable` flag;
+  they are now two focused widgets (`List.Render(w, h)` drops the flag), which
+  removes the never-used pager branch from the list path.
+- **Raised `sshx` coverage** from ~48% to ~72% with white-box tests for the
+  non-interactive helpers (`termType`, `classifyDialError`, `contains`,
+  `appendKnownHost`, `confirmHost`, and the `hostKeyCallback` pinning/rejection
+  paths). The remaining gap is interactive (`Shell`, terminal read).
+- **Testability seams** — extracted terminal-independent cores so the
+  interactive paths can be tested without a real TTY, with no behavior change:
+  the host-key TOFU prompt (`confirmHost`), the key passphrase decrypt path
+  (`parseSigner`), and the dashboard/fleet event loops (`loop`, driven by an
+  injected `screen` interface and input/signal/tick channels). Total coverage
+  rose from ~67% to ~74% (dashboard 80%, fleet 62%, sshx 72%, keys 77%).
+
 ## [0.1.1] - 2026-07-01
 
 Quality, tooling, and documentation hardening. No new features and no behavior
@@ -97,5 +132,6 @@ Initial release.
   no telemetry.
 
 [Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...HEAD
+[0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wigata-Intech/kay/releases/tag/v0.1.0

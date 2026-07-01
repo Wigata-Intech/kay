@@ -1,11 +1,9 @@
-// White-box: exercises unexported helpers (rows, render, statCell, colorFor,
-// humanDurShort, firstLine) and the unexported hostState type directly.
+// White-box: exercises unexported helpers (rows, render, statCell,
+// humanDurShort) and the unexported hostState type directly.
 package fleet
 
 import (
 	"errors"
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -22,12 +20,6 @@ func noColor(t *testing.T) {
 	old := tui.ColorEnabled
 	tui.ColorEnabled = false
 	t.Cleanup(func() { tui.ColorEnabled = old })
-}
-
-// funcName resolves a color function to its fully-qualified name so colorFor's
-// choice can be asserted without invoking it.
-func funcName(f func(string) string) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
 // sampleHosts / sampleStates build a small fleet fixture: one online host, one
@@ -57,26 +49,6 @@ func sampleStates() []hostState {
 	}
 }
 
-func TestFirstLine(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "single line", in: "boom", want: "boom"},
-		{name: "empty", in: "", want: ""},
-		{name: "multi line takes first", in: "first\nsecond\nthird", want: "first"},
-		{name: "leading newline", in: "\nrest", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := firstLine(tt.in); got != tt.want {
-				t.Errorf("firstLine(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestHumanDurShort(t *testing.T) {
 	tests := []struct {
 		name string
@@ -93,28 +65,6 @@ func TestHumanDurShort(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := humanDurShort(tt.sec); got != tt.want {
 				t.Errorf("humanDurShort(%v) = %q, want %q", tt.sec, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestColorFor(t *testing.T) {
-	tests := []struct {
-		name string
-		pct  float64
-		want string // name of the tui color function expected
-	}{
-		{name: "low is green", pct: 10, want: funcName(tui.Green)},
-		{name: "just below yellow", pct: 69.9, want: funcName(tui.Green)},
-		{name: "yellow boundary", pct: 70, want: funcName(tui.Yellow)},
-		{name: "mid yellow", pct: 80, want: funcName(tui.Yellow)},
-		{name: "red boundary", pct: 90, want: funcName(tui.Red)},
-		{name: "high is red", pct: 99, want: funcName(tui.Red)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := funcName(colorFor(tt.pct)); got != tt.want {
-				t.Errorf("colorFor(%v) = %s, want %s", tt.pct, got, tt.want)
 			}
 		})
 	}

@@ -16,8 +16,9 @@ func TabBar(tabs []string, active, width int) string {
 	return ClampLine(strings.Join(parts, " "), width)
 }
 
-// List is a scrollable, selectable set of pre-formatted plain-text rows. The
-// caller formats row columns; List handles selection highlight and scrolling.
+// List is a selectable set of pre-formatted plain-text rows with a moving
+// cursor. The caller formats row columns; List handles selection highlight and
+// keeping the cursor visible. For non-selectable scrolling use Pager.
 type List struct {
 	Header   string // optional column header (not selectable)
 	Rows     []string
@@ -50,46 +51,9 @@ func (l *List) Move(d int) {
 func (l *List) Top()    { l.Selected = 0 }
 func (l *List) Bottom() { l.Selected = len(l.Rows) - 1; l.clamp() }
 
-// Pager-mode scrolling (used when the list is rendered non-selectable, e.g. the
-// detail/logs overlay). The offset's upper bound is clamped during Render.
-func (l *List) ScrollBy(d int) {
-	l.offset += d
-	if l.offset < 0 {
-		l.offset = 0
-	}
-}
-func (l *List) ScrollTop()     { l.offset = 0 }
-func (l *List) ScrollBottom()  { l.offset = len(l.Rows) } // clamped in Render
-func (l *List) ScrollTo(i int) { l.offset = i }           // clamped in Render
-
-// Offset/Len expose pager state for callers that render rows themselves
-// (e.g. a pager that adds search highlighting and horizontal scrolling).
-func (l *List) Offset() int { return l.offset }
-func (l *List) Len() int    { return len(l.Rows) }
-
-// PagerWindow clamps the offset for the given viewport height and returns the
-// [start,end) range of rows that should be displayed.
-func (l *List) PagerWindow(height int) (start, end int) {
-	maxOff := len(l.Rows) - height
-	if maxOff < 0 {
-		maxOff = 0
-	}
-	if l.offset > maxOff {
-		l.offset = maxOff
-	}
-	if l.offset < 0 {
-		l.offset = 0
-	}
-	end = l.offset + height
-	if end > len(l.Rows) {
-		end = len(l.Rows)
-	}
-	return l.offset, end
-}
-
 // Render returns at most height lines (including any header) each clamped to
-// width. When selectable, the current row is shown in reverse video.
-func (l *List) Render(width, height int, selectable bool) []string {
+// width, with the current row shown in reverse video.
+func (l *List) Render(width, height int) []string {
 	var out []string
 	if height <= 0 {
 		return out
@@ -103,11 +67,6 @@ func (l *List) Render(width, height int, selectable bool) []string {
 	}
 	if len(l.Rows) == 0 {
 		return append(out, Dim(Pad("(none)", width)))
-	}
-
-	if !selectable {
-		// Pager mode: the scroll offset is authoritative (no hidden cursor).
-		return append(out, l.renderPager(width, height)...)
 	}
 	return append(out, l.renderSelectable(width, height)...)
 }
@@ -166,26 +125,62 @@ func (l *List) renderSelectable(width, height int) []string {
 	return out
 }
 
-// renderPager renders rows from the scroll offset, filling height. The offset's
-// upper bound is clamped here so ScrollBottom/ScrollTo can set it freely.
-func (l *List) renderPager(width, height int) []string {
-	maxOff := len(l.Rows) - height
+// Pager is a scrollable, non-selectable view of pre-formatted rows — used for
+// overlays like the detail/logs view. The scroll offset is authoritative (no
+// hidden cursor); its upper bound is clamped lazily in Window/Render so callers
+// may ScrollBottom/ScrollTo freely.
+type Pager struct {
+	Rows   []string
+	offset int
+}
+
+// ScrollBy shifts the viewport by d rows (negative = up); the lower bound is
+// clamped here, the upper bound in Window.
+func (p *Pager) ScrollBy(d int) {
+	p.offset += d
+	if p.offset < 0 {
+		p.offset = 0
+	}
+}
+
+func (p *Pager) ScrollTop()     { p.offset = 0 }
+func (p *Pager) ScrollBottom()  { p.offset = len(p.Rows) } // clamped in Window
+func (p *Pager) ScrollTo(i int) { p.offset = i }           // clamped in Window
+
+// Offset/Len expose scroll state for callers that render rows themselves (e.g. a
+// pager that adds search highlighting and horizontal scrolling).
+func (p *Pager) Offset() int { return p.offset }
+func (p *Pager) Len() int    { return len(p.Rows) }
+
+// Window clamps the offset for the given viewport height and returns the
+// [start,end) range of rows that should be displayed.
+func (p *Pager) Window(height int) (start, end int) {
+	maxOff := len(p.Rows) - height
 	if maxOff < 0 {
 		maxOff = 0
 	}
-	if l.offset > maxOff {
-		l.offset = maxOff
+	if p.offset > maxOff {
+		p.offset = maxOff
 	}
-	if l.offset < 0 {
-		l.offset = 0
+	if p.offset < 0 {
+		p.offset = 0
 	}
-	end := l.offset + height
-	if end > len(l.Rows) {
-		end = len(l.Rows)
+	end = p.offset + height
+	if end > len(p.Rows) {
+		end = len(p.Rows)
 	}
-	out := make([]string, 0, end-l.offset)
-	for i := l.offset; i < end; i++ {
-		out = append(out, Pad(l.Rows[i], width))
+	return p.offset, end
+}
+
+// Render returns the visible rows for the given viewport, each padded to width.
+func (p *Pager) Render(width, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	start, end := p.Window(height)
+	out := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		out = append(out, Pad(p.Rows[i], width))
 	}
 	return out
 }

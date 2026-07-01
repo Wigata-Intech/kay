@@ -6,7 +6,6 @@ package fleet
 import (
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +36,26 @@ type hostState struct {
 	ok   bool
 }
 
-// Run shows the fleet overview until the user quits.
+// screen is the subset of *tui.Screen the fleet loop needs. It is an interface
+// so loop can be driven in tests without owning a real terminal.
+type screen interface {
+	Size() (int, int)
+	Draw(lines []string)
+}
+
+// fleetView holds the mutable state of a running fleet overview.
+type fleetView struct {
+	hosts      []Host
+	states     []hostState
+	list       tui.List
+	interval   time.Duration
+	anon       bool
+	results    chan []hostState
+	collecting bool
+}
+
+// Run shows the fleet overview until the user quits. It owns the terminal
+// lifecycle, then hands the wired input and tick sources to loop.
 func Run(hosts []Host, opts Options) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no servers registered; add one with 'kay server add'")
@@ -45,7 +63,7 @@ func Run(hosts []Host, opts Options) error {
 	if opts.Interval <= 0 {
 		opts.Interval = 5 * time.Second
 	}
-	setColor(opts.Color)
+	tui.SetColorMode(opts.Color)
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return runPlain(hosts, opts.Interval, opts.Anonymize)
@@ -57,18 +75,12 @@ func Run(hosts []Host, opts Options) error {
 	}
 	defer scr.Close()
 
-	states := make([]hostState, len(hosts))
-	var list tui.List
-	interval := opts.Interval
-
-	results := make(chan []hostState, 1)
-	collecting := false
-	trigger := func() {
-		if collecting {
-			return
-		}
-		collecting = true
-		go func() { results <- collectAll(hosts) }()
+	v := &fleetView{
+		hosts:    hosts,
+		states:   make([]hostState, len(hosts)),
+		interval: opts.Interval,
+		anon:     opts.Anonymize,
+		results:  make(chan []hostState, 1),
 	}
 
 	events := make(chan tui.Event, 16)
@@ -83,29 +95,47 @@ func Run(hosts []Host, opts Options) error {
 		}
 	}()
 
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(v.interval)
 	defer ticker.Stop()
 
+	v.trigger() // kick off the first collection before entering the loop
+	return v.loop(scr, events, ticker.C, ticker)
+}
+
+// trigger starts a fleet collection unless one is already in flight.
+func (v *fleetView) trigger() {
+	if v.collecting {
+		return
+	}
+	v.collecting = true
+	hosts := v.hosts
+	go func() { v.results <- collectAll(hosts) }()
+}
+
+// loop is the fleet's terminal-independent event loop: it redraws on every event
+// and returns when the user quits. The screen, input, and tick sources are
+// injected so it can run headless in tests. ticker is passed through to
+// handleFleetKey for interval changes; loop reads ticks from tick.
+func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) error {
 	draw := func() {
 		w, h := scr.Size()
-		scr.Draw(render(hosts, states, &list, interval, w, h, opts.Anonymize))
+		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, w, h, v.anon))
 	}
-	trigger()
 	draw()
 
 	for {
 		select {
 		case ev := <-events:
-			if handleFleetKey(ev, &list, &interval, ticker, trigger) {
+			if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
 				return nil
 			}
 			draw()
-		case st := <-results:
-			collecting = false
-			states = st
+		case st := <-v.results:
+			v.collecting = false
+			v.states = st
 			draw()
-		case <-ticker.C:
-			trigger()
+		case <-tick:
+			v.trigger()
 		}
 	}
 }
@@ -188,10 +218,10 @@ func render(hosts []Host, states []hostState, list *tui.List, interval time.Dura
 	out := []string{tui.Bold(tui.ClampLine(
 		fmt.Sprintf("kay fleet · %s · every %s", time.Now().Format("15:04:05"), interval), cw))}
 	out = append(out, tui.Box(fmt.Sprintf("Fleet — %d/%d online", online, len(hosts)),
-		list.Render(innerW, innerH, true), cw, innerH)...)
+		list.Render(innerW, innerH), cw, innerH)...)
 	out = append(out, tui.Dim(tui.ClampLine(
 		"j/k select · r refresh · +/- interval · q quit   (open a host: kay dashboard --alias …)", cw)))
-	return clampAll(out, w, h)
+	return tui.ClampAll(out, w, h)
 }
 
 func rows(hosts []Host, states []hostState, anon bool) []string {
@@ -207,7 +237,7 @@ func rows(hosts []Host, states []hostState, anon bool) []string {
 		st := states[i]
 		switch {
 		case st.err != nil:
-			out[i] = fmt.Sprintf("%s %s %s", alias, host, tui.Red("offline: "+firstLine(st.err.Error())))
+			out[i] = fmt.Sprintf("%s %s %s", alias, host, tui.Red("offline: "+tui.FirstLine(st.err.Error())))
 		case !st.ok:
 			out[i] = fmt.Sprintf("%s %s %s", alias, host, tui.Dim("connecting…"))
 		default:
@@ -226,18 +256,7 @@ func rows(hosts []Host, states []hostState, anon bool) []string {
 }
 
 func statCell(label string, pct float64) string {
-	return colorFor(pct)(fmt.Sprintf("%s %3.0f%%", label, pct))
-}
-
-func colorFor(pct float64) func(string) string {
-	switch {
-	case pct >= 90:
-		return tui.Red
-	case pct >= 70:
-		return tui.Yellow
-	default:
-		return tui.Green
-	}
+	return tui.ThreshColor(fmt.Sprintf("%s %3.0f%%", label, pct), pct)
 }
 
 func runPlain(hosts []Host, interval time.Duration, anon bool) error {
@@ -253,7 +272,7 @@ func runPlain(hosts []Host, interval time.Duration, anon bool) error {
 			}
 			st := states[i]
 			if st.err != nil {
-				fmt.Printf("  %-14s %-16s offline: %s\n", alias, host, firstLine(st.err.Error()))
+				fmt.Printf("  %-14s %-16s offline: %s\n", alias, host, tui.FirstLine(st.err.Error()))
 				continue
 			}
 			s := st.snap
@@ -268,39 +287,10 @@ func runPlain(hosts []Host, interval time.Duration, anon bool) error {
 	}
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
 func humanDurShort(sec float64) string {
 	d := time.Duration(sec) * time.Second
 	if days := int(d.Hours()) / 24; days > 0 {
 		return fmt.Sprintf("%dd", days)
 	}
 	return fmt.Sprintf("%dh", int(d.Hours()))
-}
-
-func clampAll(lines []string, w, h int) []string {
-	if len(lines) > h {
-		lines = lines[:h]
-	}
-	for i := range lines {
-		lines[i] = tui.ClampLine(lines[i], w)
-	}
-	return lines
-}
-
-func setColor(mode string) {
-	switch mode {
-	case "always":
-		tui.ColorEnabled = true
-	case "never":
-		tui.ColorEnabled = false
-	default:
-		tui.ColorEnabled = os.Getenv("NO_COLOR") == "" &&
-			os.Getenv("TERM") != "dumb" && term.IsTerminal(int(os.Stdout.Fd()))
-	}
 }

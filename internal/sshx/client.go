@@ -190,17 +190,24 @@ func hostKeyCallback(opts DialOptions) (ssh.HostKeyCallback, error) {
 }
 
 // confirmNewHost shows the fingerprint of a previously-unseen host and asks the
-// user to approve it. Refuses automatically when there is no terminal to ask.
+// user to approve it on the real terminal. Refuses when there is no TTY to ask.
 func confirmNewHost(hostname string, key ssh.PublicKey) bool {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		fmt.Fprintf(os.Stderr, "kay: unknown host %s and no terminal to confirm — refusing.\n", hostname)
+	return confirmHost(os.Stdin, os.Stderr, term.IsTerminal(int(os.Stdin.Fd())), hostname, key)
+}
+
+// confirmHost is the terminal-independent core of the TOFU prompt: it prints the
+// fingerprint to out and reads a yes/no answer from in, refusing outright when
+// isTTY is false (nobody to ask). Split from confirmNewHost so the accept, reject,
+// and no-terminal paths are testable without a real terminal.
+func confirmHost(in io.Reader, out io.Writer, isTTY bool, hostname string, key ssh.PublicKey) bool {
+	if !isTTY {
+		fmt.Fprintf(out, "kay: unknown host %s and no terminal to confirm — refusing.\n", hostname)
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "The authenticity of host %s can't be established.\n", hostname)
-	fmt.Fprintf(os.Stderr, "%s key fingerprint is %s\n", key.Type(), ssh.FingerprintSHA256(key))
-	fmt.Fprint(os.Stderr, "Trust this host and continue connecting? (yes/no): ")
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	fmt.Fprintf(out, "The authenticity of host %s can't be established.\n", hostname)
+	fmt.Fprintf(out, "%s key fingerprint is %s\n", key.Type(), ssh.FingerprintSHA256(key))
+	fmt.Fprint(out, "Trust this host and continue connecting? (yes/no): ")
+	line, _ := bufio.NewReader(in).ReadString('\n')
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "yes" || line == "y"
 }

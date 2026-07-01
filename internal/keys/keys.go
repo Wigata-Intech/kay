@@ -98,21 +98,28 @@ func LoadSigner(privPath string) (ssh.Signer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseSigner(data, privPath, promptPassphrase)
+}
+
+// parseSigner turns key bytes into a signer, calling prompt for a passphrase only
+// when the key is encrypted. The prompt is injected so the encrypted-key path is
+// testable without a real terminal.
+func parseSigner(data []byte, name string, prompt func(string) ([]byte, error)) (ssh.Signer, error) {
 	signer, err := ssh.ParsePrivateKey(data)
 	if err == nil {
 		return signer, nil
 	}
 	var missing *ssh.PassphraseMissingError
 	if !errors.As(err, &missing) {
-		return nil, fmt.Errorf("parse private key %s: %w", privPath, err)
+		return nil, fmt.Errorf("parse private key %s: %w", name, err)
 	}
-	pass, perr := promptPassphrase(filepath.Base(privPath))
+	pass, perr := prompt(filepath.Base(name))
 	if perr != nil {
 		return nil, perr
 	}
 	signer, err = ssh.ParsePrivateKeyWithPassphrase(data, pass)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt private key %s: %w", privPath, err)
+		return nil, fmt.Errorf("decrypt private key %s: %w", name, err)
 	}
 	return signer, nil
 }
