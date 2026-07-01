@@ -56,6 +56,13 @@ func (m *model) render(w, h int) []string {
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
 
+	if m.notice != "" {
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box("Notice", []string{"", "  " + m.notice, ""}, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine("press any key to dismiss", cw)))
+		return tui.ClampAll(out, w, h)
+	}
+
 	if m.detail != nil {
 		body := m.renderDetailBody(innerW, innerH)
 		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
@@ -69,7 +76,7 @@ func (m *model) render(w, h int) []string {
 		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
 		out = append(out, tui.Box(title, body, cw, innerH)...)
 		out = append(out, tui.Dim(tui.ClampLine(
-			"↑/↓ select · enter/→ open · ←/backspace up · esc back", cw)))
+			"j/k select · l/enter open · h/backspace up · . hidden · esc back", cw)))
 		return tui.ClampAll(out, w, h)
 	}
 
@@ -247,7 +254,7 @@ func (m *model) blockedReadOnly() bool {
 }
 
 func (m *model) keyHints() string {
-	base := "Tab/[ ] tabs · r refresh · +/- interval · q quit"
+	base := "Tab/H/L tabs · r refresh · +/- interval · q quit"
 	if m.readOnly {
 		base = tui.Yellow("[read-only]") + " " + base
 	}
@@ -263,7 +270,7 @@ func (m *model) keyHints() string {
 		}
 		return "j/k select · l logs · R restart · x stop · Enter inspect · " + base
 	case tabDisk:
-		return "j/k select · Enter explore (du) · " + base
+		return "j/k select · Enter/l explore (du) · " + base
 	case tabNetwork:
 		return "j/k select · " + base
 	}

@@ -8,13 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Disk explorer** — press Enter on a mount in the dashboard's Disk tab to drill
-  into it with `du`: directories are listed largest-first, Enter/→ descends,
-  ←/Backspace goes up (never above the mount), and Esc exits. The scan runs
-  on-demand over SSH (`du -x -k -d 1`), one level at a time; paths are
-  single-quoted so names with spaces or shell metacharacters are inert. Scans run
-  asynchronously with a loading state, so the dashboard stays responsive on large
-  trees; keys are ignored while a scan is in flight (except Esc to cancel).
+- **Disk explorer** — press Enter (or `l`) on a mount in the dashboard's Disk tab
+  to drill into it: directories (recursive `du` size) **and files** (size via
+  `find`) are listed largest-first, showing the name and extension. `Enter`/`l`/→
+  descends into a directory, `h`/←/Backspace goes up (never above the mount), and
+  Esc exits. Dotfiles are hidden by default; `.` toggles them and shown hidden
+  entries are dimmed and tagged. Opening a file raises a dismissable
+  "not supported" notice. Scans run on-demand over SSH, one level at a time, and
+  **asynchronously** with a loading state so the dashboard stays responsive on
+  large trees; keys are ignored mid-scan (except Esc to cancel). Paths are
+  single-quoted so names with spaces or shell metacharacters are inert.
+- **Vim-friendly keys** — the dashboard is consistent across every tab and
+  overlay: `h/j/k/l` to move, `g/G` for ends, `H`/`L` to switch tabs, and
+  `Esc`/`q` to back out.
 
 ## [0.1.2] - 2026-07-01
 

@@ -11,6 +11,11 @@ import (
 func (m *model) handleKey(ev tui.Event) keyResult {
 	m.status = ""
 
+	if m.notice != "" {
+		m.notice = "" // any key dismisses the modal
+		return keyResult{}
+	}
+
 	if m.detail != nil {
 		return m.handleDetailKey(ev)
 	}
@@ -66,9 +71,9 @@ func (m *model) handleGlobalKey(ev tui.Event) (r keyResult, handled bool) {
 		return keyResult{quit: true}, true
 	case ev.Key == tui.KeyTab:
 		m.tab = (m.tab + 1) % len(tabNames)
-	case ev.Key == tui.KeyShiftTab, ev.Rune == '[':
+	case ev.Key == tui.KeyShiftTab, ev.Rune == '[', ev.Rune == 'H':
 		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
-	case ev.Rune == ']':
+	case ev.Rune == ']', ev.Rune == 'L':
 		m.tab = (m.tab + 1) % len(tabNames)
 	case ev.Rune >= '1' && ev.Rune <= '5':
 		m.tab = int(ev.Rune - '1')

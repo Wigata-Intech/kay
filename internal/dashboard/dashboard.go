@@ -78,6 +78,7 @@ type model struct {
 	detail      *tui.Pager
 	detailTitle string
 	diskExpl    *diskExplorer // non-nil while drilling into a mount with du
+	notice      string        // non-empty shows a dismissable modal message
 
 	// detail-pager search + horizontal scroll state
 	searching   bool

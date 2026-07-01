@@ -118,14 +118,18 @@ cursor, and guarded actions. It runs in the terminal's alternate screen, so it
 never pollutes your scrollback and restores your previous view on exit.
 
 ```
-Tabs    : Tab / Shift-Tab · [ / ] · or 1-5   → Overview · Processes · Docker · Network · Disk
+Tabs    : Tab / Shift-Tab · [ / ] · H / L · or 1-5   → Overview · Processes · Docker · Network · Disk
 Global  : r refresh now · +/- change interval · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
 Process : s cycle sort (CPU/MEM/PID/name) · x SIGTERM · X SIGKILL   (asks y/N first)
 Docker  : l logs · R restart · x stop       (restart/stop ask y/N first)
-Disk    : Enter explore a mount (du) · ↑↓ select · Enter/→ open · ←/⌫ up · Esc back
+Disk    : Enter/l explore a mount (du) — dirs & files by size; . toggles hidden;
+          j/k select · Enter/l/→ open dir · h/←/⌫ up · Esc back  (opening a file: notice)
 Detail  : j/k ↑↓ scroll · h/l ←→ pan · g/G ends · / search (n/N next) · Esc/q back
 ```
+
+Keys are vim-friendly throughout: `h/j/k/l` move, `g/G` jump to ends, `H/L`
+switch tabs, and `Esc`/`q` back out of any overlay.
 
 The Overview shows CPU/memory sparkline history; on wide terminals it splits
 into system gauges (left) and top processes (right).

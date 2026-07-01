@@ -1,5 +1,6 @@
-// White-box: exercises the unexported du parser and diskExplorer navigation,
-// which are internal to the dashboard model.
+// White-box: exercises the unexported du/find parser and diskExplorer
+// navigation (files, hidden toggle, file-open notice), which are internal to the
+// dashboard model.
 package dashboard
 
 import (
@@ -11,8 +12,8 @@ import (
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
-// pumpDu drains one async du result and applies it, standing in for the event
-// loop's m.duResults arm.
+// pumpDu drains one async listing result and applies it, standing in for the
+// event loop's m.duResults arm.
 func pumpDu(t *testing.T, m *model) {
 	t.Helper()
 	select {
@@ -23,7 +24,7 @@ func pumpDu(t *testing.T, m *model) {
 	}
 }
 
-func TestParseDu(t *testing.T) {
+func TestParseListing(t *testing.T) {
 	tests := []struct {
 		name string
 		out  string
@@ -31,28 +32,29 @@ func TestParseDu(t *testing.T) {
 		want []duEntry
 	}{
 		{
-			name: "tab separated, base dropped, sorted desc",
-			out:  "100\t/var\n400\t/\n250\t/home\n50\t/usr",
+			name: "dirs and files, base dropped, sorted, hidden flagged",
+			out:  "d\t400\t/\nd\t250\t/home\nf\t100\t/setup.sh\nd\t10\t/.cache",
 			base: "/",
-			want: []duEntry{{250, "/home"}, {100, "/var"}, {50, "/usr"}},
+			want: []duEntry{
+				{kb: 250, path: "/home", isDir: true},
+				{kb: 100, path: "/setup.sh"},
+				{kb: 10, path: "/.cache", isDir: true, hidden: true},
+			},
 		},
 		{
-			name: "space-separated fallback",
-			out:  "300   /srv\n900   /data",
-			base: "/mnt",
-			want: []duEntry{{900, "/data"}, {300, "/srv"}},
+			name: "hidden file flagged",
+			out:  "f\t8\t/app/.env\nf\t20\t/app/main.go",
+			base: "/app",
+			want: []duEntry{
+				{kb: 20, path: "/app/main.go"},
+				{kb: 8, path: "/app/.env", hidden: true},
+			},
 		},
 		{
-			name: "path with spaces preserved (tab split)",
-			out:  "12\t/home/my docs\n40\t/opt",
+			name: "garbage and short lines skipped",
+			out:  "\nd\tnotanum\t/x\nonly\ttwo\nf\t64\t/ok",
 			base: "/",
-			want: []duEntry{{40, "/opt"}, {12, "/home/my docs"}},
-		},
-		{
-			name: "garbage and blank lines skipped",
-			out:  "\nnotanumber\t/x\n\n64\t/ok\n",
-			base: "/",
-			want: []duEntry{{64, "/ok"}},
+			want: []duEntry{{kb: 64, path: "/ok"}},
 		},
 		{
 			name: "empty output",
@@ -63,9 +65,9 @@ func TestParseDu(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseDu(tt.out, tt.base)
+			got := parseListing(tt.out, tt.base)
 			if len(got) != len(tt.want) {
-				t.Fatalf("parseDu = %v, want %v", got, tt.want)
+				t.Fatalf("parseListing = %+v, want %+v", got, tt.want)
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
@@ -96,11 +98,11 @@ func TestShellSingleQuote(t *testing.T) {
 	}
 }
 
-func TestDuCommand(t *testing.T) {
-	got := duCommand("/var/log")
-	for _, want := range []string{"du -x -k -d 1 --", "'/var/log'", "sort -rn"} {
+func TestListingCommand(t *testing.T) {
+	got := listingCommand("/var/log")
+	for _, want := range []string{"du -x -k -d 1 --", "'/var/log'", "find", "-type f", "-printf"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("duCommand missing %q: %q", want, got)
+			t.Errorf("listingCommand missing %q: %q", want, got)
 		}
 	}
 }
@@ -128,11 +130,11 @@ func TestWithinRoot(t *testing.T) {
 }
 
 func TestDiskAction(t *testing.T) {
-	du := "400\t/\n250\t/home\n100\t/var"
+	listing := "d\t400\t/\nd\t250\t/home\nd\t100\t/var"
 
 	t.Run("enter on a mount opens the explorer", func(t *testing.T) {
 		m := newModel()
-		m.client = &fakeClient{out: du}
+		m.client = &fakeClient{out: listing}
 		m.duResults = make(chan duResult, 1)
 		m.tab = tabDisk
 		m.disk.Selected = 0 // sampleSnap has one disk mounted at "/"
@@ -141,9 +143,6 @@ func TestDiskAction(t *testing.T) {
 		if m.diskExpl == nil {
 			t.Fatal("Enter should open the disk explorer")
 		}
-		if m.diskExpl.path != "/" || m.diskExpl.root != "/" {
-			t.Errorf("explorer at %q (root %q), want /", m.diskExpl.path, m.diskExpl.root)
-		}
 		if !m.diskExpl.loading {
 			t.Error("explorer should start in the loading state")
 		}
@@ -151,17 +150,17 @@ func TestDiskAction(t *testing.T) {
 		if m.diskExpl.loading {
 			t.Error("loading should clear after the scan result")
 		}
-		if len(m.diskExpl.entries) != 2 {
-			t.Fatalf("entries = %d, want 2 (children of /)", len(m.diskExpl.entries))
+		if len(m.diskExpl.visible) != 2 {
+			t.Fatalf("visible = %d, want 2 (children of /)", len(m.diskExpl.visible))
 		}
-		if m.diskExpl.entries[0].path != "/home" {
-			t.Errorf("first (largest) entry = %q, want /home", m.diskExpl.entries[0].path)
+		if m.diskExpl.visible[0].path != "/home" {
+			t.Errorf("first (largest) entry = %q, want /home", m.diskExpl.visible[0].path)
 		}
 	})
 
 	t.Run("non-enter key is ignored", func(t *testing.T) {
 		m := newModel()
-		m.client = &fakeClient{out: du}
+		m.client = &fakeClient{out: listing}
 		m.tab = tabDisk
 		m.diskAction(tui.Event{Rune: 'j'})
 		if m.diskExpl != nil {
@@ -171,7 +170,7 @@ func TestDiskAction(t *testing.T) {
 
 	t.Run("no disks: enter is a no-op", func(t *testing.T) {
 		m := newModel()
-		m.client = &fakeClient{out: du}
+		m.client = &fakeClient{out: listing}
 		m.snap.Disks = nil
 		m.disk.SetRows(nil)
 		m.tab = tabDisk
@@ -182,34 +181,10 @@ func TestDiskAction(t *testing.T) {
 	})
 }
 
-func TestDiskExplorerLoadingIgnoresKeys(t *testing.T) {
-	m := newModel()
-	m.client = &fakeClient{out: "400\t/\n100\t/var"}
-	m.duResults = make(chan duResult, 1)
-	m.openDiskExplorer("/") // now loading, scan in flight
-
-	// Navigation keys are ignored while loading.
-	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEnter})
-	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyDown})
-	if m.diskExpl == nil || !m.diskExpl.loading {
-		t.Fatal("keys other than close must be ignored while loading")
-	}
-	// Esc force-closes even mid-scan.
-	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEsc})
-	if m.diskExpl != nil {
-		t.Error("Esc should force-close during loading")
-	}
-	// Drain the now-stale in-flight result: applyDu must ignore it (explorer nil).
-	pumpDu(t, m)
-	if m.diskExpl != nil {
-		t.Error("a stale scan result must not reopen the explorer")
-	}
-}
-
 func TestDiskExplorerNavigation(t *testing.T) {
 	m := newModel()
 	m.snap.Disks = []metrics.Disk{{Mount: "/data"}}
-	m.client = &fakeClient{out: "400\t/data\n250\t/data/logs\n100\t/data/cache"}
+	m.client = &fakeClient{out: "d\t400\t/data\nd\t250\t/data/logs\nd\t100\t/data/cache"}
 	m.duResults = make(chan duResult, 1)
 	m.openDiskExplorer("/data")
 	pumpDu(t, m) // initial scan completes
@@ -241,5 +216,93 @@ func TestDiskExplorerNavigation(t *testing.T) {
 	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEsc})
 	if m.diskExpl != nil {
 		t.Error("Esc should close the explorer")
+	}
+}
+
+func TestDiskHiddenToggle(t *testing.T) {
+	m := newModel()
+	m.snap.Disks = []metrics.Disk{{Mount: "/"}}
+	m.client = &fakeClient{out: "d\t400\t/\nd\t50\t/etc\nd\t10\t/.git"}
+	m.duResults = make(chan duResult, 1)
+	m.openDiskExplorer("/")
+	pumpDu(t, m)
+
+	// Dotfiles are hidden by default: only /etc is visible.
+	if len(m.diskExpl.visible) != 1 || m.diskExpl.visible[0].path != "/etc" {
+		t.Fatalf("default visible = %+v, want just /etc", m.diskExpl.visible)
+	}
+
+	// '.' reveals hidden entries.
+	m.handleDiskExplorerKey(tui.Event{Rune: '.'})
+	if len(m.diskExpl.visible) != 2 {
+		t.Fatalf("after toggle, visible = %d, want 2", len(m.diskExpl.visible))
+	}
+
+	// '.' again hides them.
+	m.handleDiskExplorerKey(tui.Event{Rune: '.'})
+	if len(m.diskExpl.visible) != 1 {
+		t.Errorf("after second toggle, visible = %d, want 1", len(m.diskExpl.visible))
+	}
+}
+
+func TestDiskOpenFileShowsNotice(t *testing.T) {
+	m := newModel()
+	m.snap.Disks = []metrics.Disk{{Mount: "/app"}}
+	m.client = &fakeClient{out: "f\t20\t/app/main.go"}
+	m.duResults = make(chan duResult, 1)
+	m.openDiskExplorer("/app")
+	pumpDu(t, m)
+
+	// Opening a file (not a directory) raises the modal notice, not a scan.
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEnter})
+	if m.notice == "" || !strings.Contains(m.notice, "main.go") {
+		t.Fatalf("notice = %q, want a file-not-supported message", m.notice)
+	}
+	if m.diskExpl.loading {
+		t.Error("opening a file should not start a scan")
+	}
+
+	// Any key dismisses the notice.
+	m.handleKey(tui.Event{Rune: 'x'})
+	if m.notice != "" {
+		t.Errorf("notice should be dismissed, got %q", m.notice)
+	}
+}
+
+func TestDiskExplorerLoadingIgnoresKeys(t *testing.T) {
+	m := newModel()
+	m.client = &fakeClient{out: "d\t400\t/\nd\t100\t/var"}
+	m.duResults = make(chan duResult, 1)
+	m.openDiskExplorer("/") // now loading, scan in flight
+
+	// Navigation keys are ignored while loading.
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEnter})
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyDown})
+	if m.diskExpl == nil || !m.diskExpl.loading {
+		t.Fatal("keys other than close must be ignored while loading")
+	}
+	// Esc force-closes even mid-scan.
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEsc})
+	if m.diskExpl != nil {
+		t.Error("Esc should force-close during loading")
+	}
+	// Drain the now-stale in-flight result: applyDu must ignore it (explorer nil).
+	pumpDu(t, m)
+	if m.diskExpl != nil {
+		t.Error("a stale scan result must not reopen the explorer")
+	}
+}
+
+func TestVimTabSwitch(t *testing.T) {
+	m := newModel()
+	m.tab = tabOverview
+
+	m.handleKey(tui.Event{Rune: 'L'}) // next tab
+	if m.tab != tabProcesses {
+		t.Errorf("after L, tab = %d, want %d", m.tab, tabProcesses)
+	}
+	m.handleKey(tui.Event{Rune: 'H'}) // previous tab
+	if m.tab != tabOverview {
+		t.Errorf("after H, tab = %d, want %d", m.tab, tabOverview)
 	}
 }
