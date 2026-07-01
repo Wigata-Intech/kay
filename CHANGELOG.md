@@ -19,6 +19,9 @@ changes — existing behavior is unchanged.
 - **CodeQL advanced setup** — a workflow + config carrying a query-filter for the
   intentional, opt-in `--insecure` host-key path.
 - **`RELEASING.md`** — maintainer guide for cutting a release.
+- **Coverage tooling** — `make cover` / `make cover-html`, plus a `Coverage`
+  workflow that publishes a self-hosted shields badge (no external service) and a
+  coverage badge in the README.
 
 ### Changed
 

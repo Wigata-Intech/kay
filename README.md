@@ -6,6 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/Wigata-Intech/kay)](https://github.com/Wigata-Intech/kay/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Wigata-Intech/kay.svg)](https://pkg.go.dev/github.com/Wigata-Intech/kay)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Wigata-Intech/kay)](https://goreportcard.com/report/github.com/Wigata-Intech/kay)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Wigata-Intech/kay/badges/coverage.json)](https://github.com/Wigata-Intech/kay/actions/workflows/coverage.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 A small, single-binary CLI to manage a fleet of Linux servers over SSH:

@@ -57,6 +57,16 @@ check: fmt-check vet test build ## Quick pre-push gate (matches CI's build-test 
 .PHONY: ci
 ci: fmt-check vet test build lint gosec vuln ## Run everything CI runs, locally
 
+.PHONY: cover
+cover: ## Run tests and print total coverage %% (writes coverage.out)
+	go test -covermode=atomic -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out | tail -1
+
+.PHONY: cover-html
+cover-html: cover ## Build an HTML coverage report (coverage.html) from coverage.out
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "wrote coverage.html"
+
 .PHONY: release-snapshot
 release-snapshot: ## Local GoReleaser dry-run, no publish (needs goreleaser)
 	goreleaser release --snapshot --clean
@@ -67,5 +77,5 @@ demo: build ## Record the anonymized demo GIF (needs vhs)
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -f $(BINARY)
+	rm -f $(BINARY) coverage.out coverage.html
 	rm -rf dist
