@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-01
+
+Internal cleanup: no behavior change and no new features. Reduces duplication,
+splits an oversized file, tightens package seams, and makes the interactive code
+testable (total coverage 66.9% → 73.7%).
+
 ### Changed
 
 - **Shared UI helpers** — moved the duplicated `setColor`, `clampAll`,
@@ -126,5 +132,6 @@ Initial release.
   no telemetry.
 
 [Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...HEAD
+[0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wigata-Intech/kay/releases/tag/v0.1.0
