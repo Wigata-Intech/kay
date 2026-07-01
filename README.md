@@ -14,8 +14,8 @@ refreshing metrics dashboard — for one host or your whole fleet.
 
 ![kay dashboard demo](docs/demo.gif)
 
-Built with the Go standard library plus `golang.org/x/crypto` and
-`golang.org/x/term` (the only third-party dependencies). Design: KISS, DRY —
+Built with the Go standard library plus the `golang.org/x` `crypto`, `term`, and
+`sys` packages (the only third-party dependencies). Design: KISS, DRY —
 one SSH path, one JSON store, a small in-repo TUI toolkit instead of a framework.
 
 Part of the **Camelot** tools.
@@ -32,7 +32,7 @@ Part of the **Camelot** tools.
 - **Fleet view.** `kay fleet` shows one live row per registered host.
 - **Safe by default.** Public-key auth only, host keys pinned on first use,
   destructive actions confirmed, keys and config stored `0600`, no telemetry.
-- **Tiny and auditable.** Stdlib + `x/crypto` + `x/term`, KISS/DRY throughout.
+- **Tiny and auditable.** Stdlib + `x/crypto`, `x/term`, `x/sys`, KISS/DRY throughout.
 
 ## Quick Setup
 
@@ -251,6 +251,8 @@ standard tools.
 | Multi-server fleet overview (one row per host) | ✅ Done | `kay fleet` — concurrent multi-host live table |
 | Richer Overview (docker health counts, sparklines) | ✅ Done | More than gauges |
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
+| CI quality gates (lint · gosec · govulncheck) | ✅ Done | golangci-lint 0 issues + gosec + govulncheck in CI and `make ci` |
+| Tech debt: reduce cyclomatic complexity (gocyclo) | ✅ Done | Every function ≤15; `gocyclo` gate enforces it — Go Report Card A+ |
 | Tech debt: shared UI helpers (dedupe dashboard/fleet) | 🧹 v0.2 | Remove duplicated formatting/colour/screen helpers |
 | Tech debt: split large files (`dashboard.go`, `main.go`) | 🧹 v0.2 | Readability; keep `cmd` thin |
 | Tech debt: broaden tests (fleet, actions, sshx) | 🧹 v0.2 | Coverage for confident refactors |
