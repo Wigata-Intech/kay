@@ -24,6 +24,9 @@ go.work.sum
 # Vendored deps (uncomment if you choose NOT to commit vendor/)
 # /vendor/
 
+# Per-user Claude Code context (personal, never pushed). CLAUDE.md IS tracked.
+CLAUDE.local.md
+
 # Editor & OS cruft
 .DS_Store
 Thumbs.db
