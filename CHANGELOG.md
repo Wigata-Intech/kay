@@ -34,6 +34,9 @@ changes — existing behavior is unchanged.
 - **License detection** — replaced `LICENSE` with the canonical Apache-2.0 text
   so pkg.go.dev reports Apache-2.0 instead of "UNKNOWN" (effective on the next
   tagged release).
+- **SSH client data race** — `sshx.Client.Close` reassigned the `done` channel
+  while the keepalive goroutine read it; `Close` now closes the channel once via
+  `sync.Once` and never reassigns it, so it is race-free and idempotent.
 
 ### Security
 

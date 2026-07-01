@@ -79,3 +79,54 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # update the sticky coverage comment on PRs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          check-latest: true
+      - name: Coverage (report + floor)
+        id: cov
+        run: |
+          go test -covermode=atomic -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+          # Per-package breakdown for the PR comment (tests are cached here).
+          {
+            echo 'pkgs<<PKGS'
+            go test -cover ./... 2>&1 | awk '/coverage:/ {printf "  %-40s %s\n", $2, $NF}'
+            echo 'PKGS'
+          } >> "$GITHUB_OUTPUT"
+          echo "Total coverage: ${pct}%"
+          # Conservative regression floor; not a target. Raise deliberately.
+          awk "BEGIN{exit !($pct>=50)}" || {
+            echo "::error::total coverage ${pct}% is below the 50% floor"; exit 1;
+          }
+      - name: Sticky coverage comment
+        if: github.event_name == 'pull_request'
+        continue-on-error: true # fork PRs get a read-only token; don't fail CI over a comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          PCT: ${{ steps.cov.outputs.pct }}
+          PKGS: ${{ steps.cov.outputs.pkgs }}
+        run: |
+          marker='<!-- coverage-report -->'
+          body="$(printf '%s\n### Test coverage: **%s%%**\n\n<details><summary>per package</summary>\n\n```\n%s\n```\n</details>\n' \
+            "$marker" "$PCT" "$PKGS")"
+          id=$(gh api "repos/$REPO/issues/$PR/comments" \
+            --jq "map(select(.body|startswith(\"$marker\")))|.[0].id // empty")
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+          echo "posted/updated coverage comment on PR #$PR"
