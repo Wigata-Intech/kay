@@ -1,0 +1,33 @@
+# Compiled binary (built via `go build -o kay ./cmd/kay`).
+# Anchored to repo root so it never matches the cmd/kay source directory.
+/kay
+*.exe
+
+# Test / coverage artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# In docs/, commit ONLY the final demo.gif. Everything else there — the vhs
+# tapes, blur.sh, and any raw/intermediate recordings — stays local.
+docs/*
+!docs/demo.gif
+
+# Release / build output
+/dist/
+
+# Go workspace files (keep go.mod/go.sum tracked)
+go.work
+go.work.sum
+
+# Vendored deps (uncomment if you choose NOT to commit vendor/)
+# /vendor/
+
+# Editor & OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

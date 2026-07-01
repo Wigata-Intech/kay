@@ -1,0 +1,15 @@
+# Run locally with: golangci-lint run
+# Not yet a CI gate — wire it into the workflow once it passes cleanly on your
+# machine (linters can flag style issues that weren't caught by go vet).
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - revive

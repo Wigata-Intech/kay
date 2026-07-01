@@ -1,0 +1,72 @@
+# GoReleaser — builds cross-platform binaries, archives, and checksums, and
+# publishes a GitHub Release when you push a tag (v*).
+# Validate config:  goreleaser check
+# Dry run locally:  goreleaser release --snapshot --clean
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: kay
+    main: ./cmd/kay
+    binary: kay
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath # reproducible: strip local filesystem paths
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}" # reproducible builds
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+# Merge the two macOS builds into one universal binary and ship that instead.
+universal_binaries:
+  - replace: true
+
+archives:
+  - id: kay
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+    name_template: >-
+      kay_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github # group by PR/commit; pairs well with Conventional Commits
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  draft: false
+  prerelease: auto # v1.2.3-rc1 etc. are marked pre-release automatically
+
+report_sizes: true
