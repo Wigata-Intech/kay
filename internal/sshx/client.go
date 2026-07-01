@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -32,8 +33,9 @@ type DialOptions struct {
 
 // Client wraps an *ssh.Client with the helpers kay needs.
 type Client struct {
-	c    *ssh.Client
-	done chan struct{}
+	c         *ssh.Client
+	done      chan struct{} // set once in Dial; closed once by Close
+	closeOnce sync.Once
 }
 
 // Dial establishes an authenticated connection.
@@ -133,12 +135,11 @@ func (c *Client) Shell() error {
 	return sess.Wait()
 }
 
-// Close terminates the connection and stops the keepalive goroutine.
+// Close terminates the connection and stops the keepalive goroutine. It is safe
+// to call more than once. The done channel is never reassigned after Dial, so
+// the keepalive goroutine reads it without racing Close.
 func (c *Client) Close() error {
-	if c.done != nil {
-		close(c.done)
-		c.done = nil
-	}
+	c.closeOnce.Do(func() { close(c.done) })
 	return c.c.Close()
 }
 

@@ -1,19 +1,25 @@
-package tui
+package tui_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
+// TestListSelectionAndScroll walks one list through render, Bottom(), and
+// re-render. The steps share state, so this is an ordered sequence rather than
+// a table.
 func TestListSelectionAndScroll(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = false // simplify string assertions
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = false // simplify string assertions
+	defer func() { tui.ColorEnabled = old }()
 
-	l := &List{Header: "H"}
+	l := &tui.List{Header: "H"}
 	rows := make([]string, 10)
 	for i := range rows {
-		rows[i] = "row" + itoa(i)
+		rows[i] = "row" + strconv.Itoa(i)
 	}
 	l.SetRows(rows)
 
@@ -42,25 +48,24 @@ func TestListSelectionAndScroll(t *testing.T) {
 }
 
 func TestListEmpty(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = false
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = false
+	defer func() { tui.ColorEnabled = old }()
 
-	l := &List{}
-	out := l.Render(20, 4, true)
+	out := (&tui.List{}).Render(20, 4, true)
 	if len(out) != 1 || !strings.Contains(out[0], "none") {
-		t.Errorf("empty list render = %v", out)
+		t.Errorf("empty list render = %v, want a single \"(none)\" line", out)
 	}
 }
 
 func TestTabBarWidth(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = false
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = false
+	defer func() { tui.ColorEnabled = old }()
 
-	bar := TabBar([]string{"Overview", "Processes", "Docker", "Network"}, 1, 40)
-	if VisibleWidth(bar) > 40 {
-		t.Errorf("tab bar width %d exceeds 40", VisibleWidth(bar))
+	bar := tui.TabBar([]string{"Overview", "Processes", "Docker", "Network"}, 1, 40)
+	if w := tui.VisibleWidth(bar); w > 40 {
+		t.Errorf("tab bar width %d exceeds 40", w)
 	}
 	if !strings.Contains(bar, "2:Processes") {
 		t.Errorf("active tab label missing: %q", bar)

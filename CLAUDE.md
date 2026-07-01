@@ -85,7 +85,9 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
 
 - **Formatting:** `gofmt` is enforced by CI. Run `make fmt`.
 - **Static analysis:** `make lint` runs golangci-lint v2 (staticcheck, govet,
-  ineffassign, unused, misspell, unconvert). Keep it at **0 issues**.
+  ineffassign, unused, misspell, unconvert, gocyclo). Keep it at **0 issues**.
+  `gocyclo` fails any function whose cyclomatic complexity exceeds 15 (test files
+  are excluded) — keep functions small (Go Report Card A+).
 - **Error strings (staticcheck ST1005):** lowercase, no trailing punctuation or
   newline. `fmt.Errorf("no servers registered; add one with 'kay server add'")`.
 - **Errors:** wrap with `%w` and context (`fmt.Errorf("dial %s: %w", host, err)`).
@@ -96,9 +98,18 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
   Current suppressions: G106 (`--insecure` opt-in), G304 (paths from kay's own
   key/config store), G306 (world-readable `.pub`).
 - **Comments** explain *why*, not *what*. Exported identifiers get doc comments
-  (pkg.go.dev is public).
-- **Tests:** table-driven where it fits; `go test -race` must pass. Add coverage
-  when you touch parsing, the store, or key handling.
+  (pkg.go.dev is public). No banner/restating noise — don't add a comment that
+  repeats what the next line already says or that restates an obvious language
+  fact (e.g. labelling a `_test` file "black-box"; the package clause says so).
+- **Tests:** external **black-box** package (`foo_test`) by default so tests go
+  through the exported API; use white-box (`package foo`) only when a test must
+  reach unexported internals (e.g. `internal/dashboard`'s model/event loop) — and
+  say why in one line. Table-driven where it fits, with consistent field names
+  (`name` / inputs / `want` / `wantErr`) and `t.Run(tt.name, …)`; keep inherently
+  stateful flows as ordered sequences, not forced tables. Order cases
+  positive/success first, then error/edge cases in code-flow order. `go test
+  -race` must pass; add coverage when you touch parsing, the store, or key
+  handling.
 
 ## Git & PR conventions
 
@@ -106,10 +117,16 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
   branch and open a PR.
 - Branches: `type/short-slug` (e.g. `chore/ci-quality-gates`, `fix/net-align`).
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`).
-- CI gates every PR: `build-test` (ubuntu+macos), `lint`, `gosec`, `govulncheck`.
-  A PR isn't ready until all four are green.
-- Releases: push a `vX.Y.Z` tag → the release workflow runs GoReleaser. Update
-  `CHANGELOG.md` (Keep a Changelog format) for the version.
+- CI gates every PR: `build-test` (ubuntu+macos), `lint`, `gosec`, `govulncheck`,
+  and `CodeQL` (advanced setup). A PR isn't ready until all are green.
+- **CHANGELOG discipline:** add an entry under `## [Unreleased]` (Keep a Changelog
+  sections: Added/Changed/Fixed/Security) for any user-facing change. The GitHub
+  Release notes are extracted from the tagged version's `CHANGELOG.md` section
+  (`release.yml` → GoReleaser `--release-notes`), **not** from commit messages — so
+  keep the changelog curated and human-readable.
+- Releases: finalize `[Unreleased]` into `## [X.Y.Z] - <date>` with compare links,
+  then push a `vX.Y.Z` tag → the release workflow runs GoReleaser. See
+  `RELEASING.md`.
 - Dependabot manages weekly gomod + github-actions bumps; those PRs are generally
   safe to merge once CI is green.
 
@@ -118,7 +135,7 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
 - `README.md` — user docs · `ARCHITECTURE.md` — layering · `SECURITY.md` — model
 - `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` — contributor rules
 - `docs/technical-design/` — design docs · `docs/demo.tape` / `blur.sh` — demo pipeline
-- `.github/workflows/` — `ci.yml` (gates) + `release.yml` (GoReleaser)
+- `.github/workflows/` — `ci.yml` (gates) · `codeql.yml` (code scanning) · `release.yml` (GoReleaser)
 - `Makefile` — all dev commands · `.goreleaser.yaml` — release build
 
 ## Personal context

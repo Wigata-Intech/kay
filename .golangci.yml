@@ -12,6 +12,17 @@ linters:
     - unused
     - misspell
     - unconvert
+    - gocyclo
+  settings:
+    gocyclo:
+      min-complexity: 15
+  exclusions:
+    rules:
+      # Assertion-heavy tests legitimately branch a lot, and gocyclo rolls
+      # t.Run func literals up into the parent; CC gating on tests is low-value.
+      - path: _test\.go
+        linters:
+          - gocyclo
 
 formatters:
   enable:

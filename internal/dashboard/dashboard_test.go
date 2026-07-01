@@ -1,3 +1,5 @@
+// White-box (package dashboard): these tests drive the unexported model and its
+// event handling, which we won't export just to satisfy black-box testing.
 package dashboard
 
 import (

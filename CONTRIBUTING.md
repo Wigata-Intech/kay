@@ -29,10 +29,17 @@ to `127.0.0.1` (see the "Verifying locally" section of the README).
 
 ## Pull requests
 
-1. Fork and create a feature branch.
-2. Keep commits focused; write clear messages.
-3. Ensure `go vet`, `go test`, and `gofmt -l` are clean.
-4. Describe the change and how you tested it. Reference any related issue.
+1. Fork and create a feature branch (`type/short-slug`).
+2. Use **Conventional Commits** (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`,
+   `ci:`, `test:`). Keep commits focused.
+3. Add a **`CHANGELOG.md`** entry under `## [Unreleased]` for any user-facing
+   change (Added / Changed / Fixed / Security). Release notes are generated from
+   the CHANGELOG section at tag time — **not** from commit messages — so write it
+   for humans. Internal-only churn (pure refactors/tests) can be summarized in one
+   line or omitted.
+4. Ensure `make ci` is clean (gofmt, vet, `test -race`, lint 0 issues, gosec,
+   govulncheck) — at minimum `go vet`, `go test`, and `gofmt -l`.
+5. Describe the change and how you tested it. Reference any related issue.
 
 ## Reporting bugs / requesting features
 

@@ -109,7 +109,13 @@ func (l *List) Render(width, height int, selectable bool) []string {
 		// Pager mode: the scroll offset is authoritative (no hidden cursor).
 		return append(out, l.renderPager(width, height)...)
 	}
+	return append(out, l.renderSelectable(width, height)...)
+}
 
+// renderSelectable renders the row window around the cursor, keeping the
+// selected row visible, reserving a line for a "more" marker when the list
+// overflows, and drawing the selection as a clean reverse-video bar.
+func (l *List) renderSelectable(width, height int) []string {
 	l.clamp()
 
 	rows := height
@@ -138,6 +144,7 @@ func (l *List) Render(width, height int, selectable bool) []string {
 			l.offset = 0
 		}
 	}
+	out := make([]string, 0, rows+1)
 	for i := l.offset; i < end; i++ {
 		// Non-selected rows keep any colour they carry; the selected row is
 		// shown as a clean reverse-video bar (colour stripped) so it reads well.

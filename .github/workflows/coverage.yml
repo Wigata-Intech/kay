@@ -1,0 +1,58 @@
+name: Coverage
+
+# Computes total test coverage on every push to main and publishes a shields.io
+# endpoint badge (coverage.json) to the orphan `badges` branch. The README reads
+# it via img.shields.io/endpoint. Self-contained: no external service, no secret
+# beyond the default GITHUB_TOKEN.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # force-push the single-file `badges` branch
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          check-latest: true
+
+      - name: Compute coverage
+        id: cov
+        run: |
+          go test -covermode=atomic -coverprofile=coverage.out ./...
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+          # Ascending tiers; the highest satisfied threshold wins.
+          color=red
+          awk "BEGIN{exit !($pct>=40)}" && color=orange
+          awk "BEGIN{exit !($pct>=60)}" && color=yellow
+          awk "BEGIN{exit !($pct>=80)}" && color=green
+          echo "color=$color" >> "$GITHUB_OUTPUT"
+          echo "coverage: ${pct}% (${color})"
+
+      - name: Publish badge to the badges branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PCT: ${{ steps.cov.outputs.pct }}
+          COLOR: ${{ steps.cov.outputs.color }}
+        run: |
+          tmp="$(mktemp -d)"
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' \
+            "$PCT" "$COLOR" > "$tmp/coverage.json"
+          cd "$tmp"
+          git init -q
+          git checkout -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit -q -m "chore: coverage badge ${PCT}%"
+          git push -q -f \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            badges

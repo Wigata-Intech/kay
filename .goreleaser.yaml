@@ -46,24 +46,12 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Release notes come from CHANGELOG.md via `--release-notes` in release.yml, so
+# GoReleaser's own commit-derived changelog is disabled — CHANGELOG.md is the
+# single, curated source of truth (a quality/chore release shouldn't be filtered
+# down to nothing).
 changelog:
-  use: github # group by PR/commit; pairs well with Conventional Commits
-  sort: asc
-  groups:
-    - title: Features
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
-      order: 0
-    - title: Bug fixes
-      regexp: '^.*?fix(\(.+\))??!?:.+$'
-      order: 1
-    - title: Others
-      order: 999
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^ci:"
+  disable: true
 
 release:
   draft: false

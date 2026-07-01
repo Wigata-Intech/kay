@@ -85,6 +85,13 @@ type model struct {
 	searchHits  []int
 	searchIdx   int
 	detailHoff  int
+
+	// event-loop runtime: created in Run and touched only from its goroutine,
+	// so the flags need no synchronisation.
+	results      chan collectResult
+	reconnected  chan reconnectResult
+	collecting   bool
+	reconnecting bool
 }
 
 type keyResult struct {
@@ -125,54 +132,20 @@ func Run(client Client, srv config.Server, opts Options) error {
 	m := &model{srv: srv, client: client, interval: opts.Interval, readOnly: opts.ReadOnly}
 	m.redial = opts.Redial
 	m.anon = opts.Anonymize
+	// Collection runs in a goroutine and reports back on these channels so the
+	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
+	m.results = make(chan collectResult, 1)
+	m.reconnected = make(chan reconnectResult, 1)
 	m.refresh()
 
 	events := make(chan tui.Event, 16)
-	reader := tui.NewReader(os.Stdin)
-	go func() {
-		for {
-			ev, err := reader.ReadEvent()
-			events <- ev
-			if err != nil {
-				return
-			}
-		}
-	}()
+	go readEvents(tui.NewReader(os.Stdin), events)
 
 	sigCh := watchSignals()
 	defer stopSignals(sigCh)
 
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
-
-	// Collection runs in a goroutine and reports back on this channel so the
-	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
-	results := make(chan collectResult, 1)
-	reconnected := make(chan reconnectResult, 1)
-	collecting := false
-	reconnecting := false
-	trigger := func() {
-		if collecting {
-			return // a collection is already in flight; don't pile up
-		}
-		collecting = true
-		cl := m.client // snapshot: reconnect may replace m.client later
-		go func() {
-			s, err := metrics.Collect(cl)
-			results <- collectResult{snap: s, err: err}
-		}()
-	}
-	attemptReconnect := func() {
-		if m.redial == nil || reconnecting {
-			return
-		}
-		reconnecting = true
-		m.status = tui.Yellow("connection lost — reconnecting…")
-		go func() {
-			nc, err := m.redial()
-			reconnected <- reconnectResult{client: nc, err: err}
-		}()
-	}
 
 	draw := func() {
 		w, h := scr.Size()
@@ -183,40 +156,19 @@ func Run(client Client, srv config.Server, opts Options) error {
 	for {
 		select {
 		case ev := <-events:
-			if ev.Type == tui.EventQuit {
+			if m.applyKeyEvent(ev, ticker) {
 				return nil
-			}
-			r := m.handleKey(ev)
-			if r.quit {
-				return nil
-			}
-			if r.intervalChanged {
-				ticker.Reset(m.interval)
-			}
-			if r.refreshNow {
-				trigger()
 			}
 			draw()
 		case <-ticker.C:
-			trigger()
-		case res := <-results:
-			collecting = false
-			if res.err != nil {
-				m.err = res.err
-				attemptReconnect()
-			} else {
-				m.applySnap(res.snap)
-			}
+			m.trigger()
+		case res := <-m.results:
+			m.collecting = false
+			m.applyCollect(res)
 			draw()
-		case rr := <-reconnected:
-			reconnecting = false
-			if rr.err == nil && rr.client != nil {
-				m.client = rr.client
-				m.status = tui.Green("reconnected")
-				trigger() // fetch fresh data immediately
-			} else {
-				m.status = tui.Red("reconnect failed — retrying")
-			}
+		case rr := <-m.reconnected:
+			m.reconnecting = false
+			m.applyReconnect(rr)
 			draw()
 		case sig := <-sigCh:
 			if signalIsQuit(sig) {
@@ -224,6 +176,83 @@ func Run(client Client, srv config.Server, opts Options) error {
 			}
 			draw() // resize or other: re-render at the current size
 		}
+	}
+}
+
+// readEvents pumps decoded input events onto ch until the reader errors.
+func readEvents(reader *tui.Reader, ch chan<- tui.Event) {
+	for {
+		ev, err := reader.ReadEvent()
+		ch <- ev
+		if err != nil {
+			return
+		}
+	}
+}
+
+// trigger starts a metrics collection unless one is already in flight.
+func (m *model) trigger() {
+	if m.collecting {
+		return // a collection is already in flight; don't pile up
+	}
+	m.collecting = true
+	cl := m.client // snapshot: reconnect may replace m.client later
+	go func() {
+		s, err := metrics.Collect(cl)
+		m.results <- collectResult{snap: s, err: err}
+	}()
+}
+
+// attemptReconnect kicks off a redial after a collection failure, if configured.
+func (m *model) attemptReconnect() {
+	if m.redial == nil || m.reconnecting {
+		return
+	}
+	m.reconnecting = true
+	m.status = tui.Yellow("connection lost — reconnecting…")
+	go func() {
+		nc, err := m.redial()
+		m.reconnected <- reconnectResult{client: nc, err: err}
+	}()
+}
+
+// applyKeyEvent handles one input event; it returns true when the loop should
+// quit.
+func (m *model) applyKeyEvent(ev tui.Event, ticker *time.Ticker) bool {
+	if ev.Type == tui.EventQuit {
+		return true
+	}
+	r := m.handleKey(ev)
+	if r.quit {
+		return true
+	}
+	if r.intervalChanged {
+		ticker.Reset(m.interval)
+	}
+	if r.refreshNow {
+		m.trigger()
+	}
+	return false
+}
+
+// applyCollect installs a collection result or starts a reconnect on failure.
+func (m *model) applyCollect(res collectResult) {
+	if res.err != nil {
+		m.err = res.err
+		m.attemptReconnect()
+	} else {
+		m.applySnap(res.snap)
+	}
+}
+
+// applyReconnect swaps in a fresh client on success, or notes the retry.
+func (m *model) applyReconnect(rr reconnectResult) {
+	if rr.err == nil && rr.client != nil {
+		m.client = rr.client
+		m.status = tui.Green("reconnected")
+		m.trigger() // fetch fresh data immediately
+	} else {
+		m.status = tui.Red("reconnect failed — retrying")
 	}
 }
 
@@ -418,50 +447,12 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		return keyResult{refreshNow: true}
 	}
 
-	switch {
-	case ev.Rune == 'q':
-		return keyResult{quit: true}
-	case ev.Key == tui.KeyTab:
-		m.tab = (m.tab + 1) % len(tabNames)
-		return keyResult{}
-	case ev.Key == tui.KeyShiftTab, ev.Rune == '[':
-		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
-		return keyResult{}
-	case ev.Rune == ']':
-		m.tab = (m.tab + 1) % len(tabNames)
-		return keyResult{}
-	case ev.Rune >= '1' && ev.Rune <= '5':
-		m.tab = int(ev.Rune - '1')
-		return keyResult{}
-	case ev.Rune == 'r':
-		return keyResult{refreshNow: true}
-	case ev.Rune == '+':
-		if m.interval < 60*time.Second {
-			m.interval += time.Second
-		}
-		return keyResult{intervalChanged: true}
-	case ev.Rune == '-':
-		if m.interval > time.Second {
-			m.interval -= time.Second
-		}
-		return keyResult{intervalChanged: true}
+	if r, handled := m.handleGlobalKey(ev); handled {
+		return r
 	}
 
 	if l := m.activeList(); l != nil {
-		switch {
-		case ev.Key == tui.KeyUp, ev.Rune == 'k':
-			l.Move(-1)
-		case ev.Key == tui.KeyDown, ev.Rune == 'j':
-			l.Move(1)
-		case ev.Key == tui.KeyPgUp, ev.Key == tui.KeyCtrlU:
-			l.Move(-10)
-		case ev.Key == tui.KeyPgDn, ev.Key == tui.KeyCtrlD:
-			l.Move(10)
-		case ev.Key == tui.KeyHome, ev.Rune == 'g':
-			l.Top()
-		case ev.Key == tui.KeyEnd, ev.Rune == 'G':
-			l.Bottom()
-		}
+		handleListNav(l, ev)
 	}
 
 	switch m.tab {
@@ -471,6 +462,56 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		m.dockAction(ev)
 	}
 	return keyResult{}
+}
+
+// handleGlobalKey processes keys valid on every tab (quit, tab switching,
+// refresh, interval). handled is false when ev is not one of them.
+func (m *model) handleGlobalKey(ev tui.Event) (r keyResult, handled bool) {
+	switch {
+	case ev.Rune == 'q':
+		return keyResult{quit: true}, true
+	case ev.Key == tui.KeyTab:
+		m.tab = (m.tab + 1) % len(tabNames)
+	case ev.Key == tui.KeyShiftTab, ev.Rune == '[':
+		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
+	case ev.Rune == ']':
+		m.tab = (m.tab + 1) % len(tabNames)
+	case ev.Rune >= '1' && ev.Rune <= '5':
+		m.tab = int(ev.Rune - '1')
+	case ev.Rune == 'r':
+		return keyResult{refreshNow: true}, true
+	case ev.Rune == '+':
+		if m.interval < 60*time.Second {
+			m.interval += time.Second
+		}
+		return keyResult{intervalChanged: true}, true
+	case ev.Rune == '-':
+		if m.interval > time.Second {
+			m.interval -= time.Second
+		}
+		return keyResult{intervalChanged: true}, true
+	default:
+		return keyResult{}, false
+	}
+	return keyResult{}, true
+}
+
+// handleListNav applies cursor-movement keys to the active list.
+func handleListNav(l *tui.List, ev tui.Event) {
+	switch {
+	case ev.Key == tui.KeyUp, ev.Rune == 'k':
+		l.Move(-1)
+	case ev.Key == tui.KeyDown, ev.Rune == 'j':
+		l.Move(1)
+	case ev.Key == tui.KeyPgUp, ev.Key == tui.KeyCtrlU:
+		l.Move(-10)
+	case ev.Key == tui.KeyPgDn, ev.Key == tui.KeyCtrlD:
+		l.Move(10)
+	case ev.Key == tui.KeyHome, ev.Rune == 'g':
+		l.Top()
+	case ev.Key == tui.KeyEnd, ev.Rune == 'G':
+		l.Bottom()
+	}
 }
 
 func (m *model) activeList() *tui.List {
@@ -597,21 +638,32 @@ func (m *model) openDetail(title, content string) {
 // handleDetailKey drives the scrollable, searchable detail/logs overlay.
 func (m *model) handleDetailKey(ev tui.Event) keyResult {
 	if m.searching {
-		switch ev.Key {
-		case tui.KeyEnter:
-			m.runSearch()
-			m.searching = false
-		case tui.KeyEsc:
-			m.searching = false
-			m.searchQuery = ""
-		case tui.KeyBackspace:
-			m.searchQuery = trimLastRune(m.searchQuery)
-		case tui.KeyRune:
-			m.searchQuery += string(ev.Rune)
-		}
-		return keyResult{}
+		m.handleDetailSearchKey(ev)
+	} else {
+		m.handleDetailNav(ev)
 	}
+	return keyResult{}
+}
 
+// handleDetailSearchKey edits the pager search query while a search is being
+// typed.
+func (m *model) handleDetailSearchKey(ev tui.Event) {
+	switch ev.Key {
+	case tui.KeyEnter:
+		m.runSearch()
+		m.searching = false
+	case tui.KeyEsc:
+		m.searching = false
+		m.searchQuery = ""
+	case tui.KeyBackspace:
+		m.searchQuery = trimLastRune(m.searchQuery)
+	case tui.KeyRune:
+		m.searchQuery += string(ev.Rune)
+	}
+}
+
+// handleDetailNav scrolls the pager, pans horizontally, and drives search jumps.
+func (m *model) handleDetailNav(ev tui.Event) {
 	switch {
 	case ev.Key == tui.KeyUp, ev.Rune == 'k':
 		m.detail.ScrollBy(-1)
@@ -642,7 +694,6 @@ func (m *model) handleDetailKey(ev tui.Event) keyResult {
 	case ev.Key == tui.KeyEsc, ev.Rune == 'q':
 		m.detail = nil
 	}
-	return keyResult{}
 }
 
 // runSearch finds all lines containing the query and jumps to the first.

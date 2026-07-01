@@ -29,6 +29,22 @@ var (
 	date    = ""
 )
 
+// handler runs a subcommand over its remaining args.
+type handler func([]string) error
+
+// handlers maps each subcommand to its implementation. version/help are handled
+// separately in main because they take no args and print directly.
+var handlers = map[string]handler{
+	"key":       cmdKey,
+	"server":    cmdServer,
+	"install":   cmdInstall,
+	"connect":   cmdConnect,
+	"exec":      cmdExec,
+	"dashboard": cmdDashboard,
+	"fleet":     cmdFleet,
+	"ls":        cmdLs,
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -37,46 +53,40 @@ func main() {
 	cmd := os.Args[1]
 	args := os.Args[2:]
 
-	var err error
 	switch cmd {
-	case "key":
-		err = cmdKey(args)
-	case "server":
-		err = cmdServer(args)
-	case "install":
-		err = cmdInstall(args)
-	case "connect":
-		err = cmdConnect(args)
-	case "exec":
-		err = cmdExec(args)
-	case "dashboard":
-		err = cmdDashboard(args)
-	case "fleet":
-		err = cmdFleet(args)
-	case "ls":
-		err = cmdLs(args)
 	case "version", "-v", "--version":
-		v := version
-		var extra []string
-		if commit != "" {
-			extra = append(extra, commit)
-		}
-		if date != "" {
-			extra = append(extra, date)
-		}
-		if len(extra) > 0 {
-			v += " (" + strings.Join(extra, ", ") + ")"
-		}
-		fmt.Println("kay " + v)
+		cmdVersion()
+		return
 	case "help", "-h", "--help":
 		usage()
-	default:
-		err = fmt.Errorf("unknown command %q", cmd)
+		return
 	}
-	if err != nil {
+
+	h, ok := handlers[cmd]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "kay: unknown command %q\n", cmd)
+		os.Exit(1)
+	}
+	if err := h(args); err != nil {
 		fmt.Fprintln(os.Stderr, "kay: "+err.Error())
 		os.Exit(1)
 	}
+}
+
+// cmdVersion prints the build version with optional commit/date, set via ldflags.
+func cmdVersion() {
+	v := version
+	var extra []string
+	if commit != "" {
+		extra = append(extra, commit)
+	}
+	if date != "" {
+		extra = append(extra, date)
+	}
+	if len(extra) > 0 {
+		v += " (" + strings.Join(extra, ", ") + ")"
+	}
+	fmt.Println("kay " + v)
 }
 
 func usage() {
@@ -112,68 +122,78 @@ func cmdKey(args []string) error {
 	}
 	switch sub {
 	case "gen":
-		fs := flag.NewFlagSet("key gen", flag.ContinueOnError)
-		name := fs.String("name", "", "key name (required)")
-		typ := fs.String("type", "ed25519", "key type: ed25519 or rsa")
-		bits := fs.Int("bits", 3072, "rsa key size in bits")
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		if *name == "" {
-			return fmt.Errorf("--name is required")
-		}
-		pair, err := keys.Generate(config.KeyType(*typ), *bits, *name)
-		if err != nil {
-			return err
-		}
-		privPath, pubPath, err := pair.Write(st.KeysDir(), *name)
-		if err != nil {
-			return err
-		}
-		if err := st.AddKey(config.Key{
-			Name: *name, Type: config.KeyType(*typ),
-			PrivatePath: privPath, PublicPath: pubPath,
-			Fingerprint: pair.Fingerprint, CreatedAt: time.Now(),
-		}); err != nil {
-			return err
-		}
-		if err := st.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("created key %q (%s)\n  %s\n  public: %s\n", *name, *typ, pair.Fingerprint, pubPath)
-		return nil
-
+		return cmdKeyGen(st, rest)
 	case "ls":
-		anon := anonEnabled()
-		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTYPE\tFINGERPRINT\tCREATED")
-		for i, k := range st.Keys {
-			name, fp := k.Name, k.Fingerprint
-			if anon {
-				name, fp = fmt.Sprintf("key-%d", i+1), "SHA256:…"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, k.Type, fp, k.CreatedAt.Format("2006-01-02"))
-		}
-		return w.Flush()
-
+		return cmdKeyLs(st)
 	case "show":
-		fs := flag.NewFlagSet("key show", flag.ContinueOnError)
-		name := fs.String("name", "", "key name")
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		k, err := st.FindKey(*name)
-		if err != nil {
-			return err
-		}
-		pub, err := keys.ReadPublic(k.PublicPath)
-		if err != nil {
-			return err
-		}
-		fmt.Print(pub)
-		return nil
+		return cmdKeyShow(st, rest)
 	}
 	return fmt.Errorf("unknown key subcommand %q", sub)
+}
+
+func cmdKeyGen(st *config.Store, rest []string) error {
+	fs := flag.NewFlagSet("key gen", flag.ContinueOnError)
+	name := fs.String("name", "", "key name (required)")
+	typ := fs.String("type", "ed25519", "key type: ed25519 or rsa")
+	bits := fs.Int("bits", 3072, "rsa key size in bits")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if *name == "" {
+		return fmt.Errorf("--name is required")
+	}
+	pair, err := keys.Generate(config.KeyType(*typ), *bits, *name)
+	if err != nil {
+		return err
+	}
+	privPath, pubPath, err := pair.Write(st.KeysDir(), *name)
+	if err != nil {
+		return err
+	}
+	if err := st.AddKey(config.Key{
+		Name: *name, Type: config.KeyType(*typ),
+		PrivatePath: privPath, PublicPath: pubPath,
+		Fingerprint: pair.Fingerprint, CreatedAt: time.Now(),
+	}); err != nil {
+		return err
+	}
+	if err := st.Save(); err != nil {
+		return err
+	}
+	fmt.Printf("created key %q (%s)\n  %s\n  public: %s\n", *name, *typ, pair.Fingerprint, pubPath)
+	return nil
+}
+
+func cmdKeyLs(st *config.Store) error {
+	anon := anonEnabled()
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tTYPE\tFINGERPRINT\tCREATED")
+	for i, k := range st.Keys {
+		name, fp := k.Name, k.Fingerprint
+		if anon {
+			name, fp = fmt.Sprintf("key-%d", i+1), "SHA256:…"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, k.Type, fp, k.CreatedAt.Format("2006-01-02"))
+	}
+	return w.Flush()
+}
+
+func cmdKeyShow(st *config.Store, rest []string) error {
+	fs := flag.NewFlagSet("key show", flag.ContinueOnError)
+	name := fs.String("name", "", "key name")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	k, err := st.FindKey(*name)
+	if err != nil {
+		return err
+	}
+	pub, err := keys.ReadPublic(k.PublicPath)
+	if err != nil {
+		return err
+	}
+	fmt.Print(pub)
+	return nil
 }
 
 // ---- server ----
@@ -189,58 +209,68 @@ func cmdServer(args []string) error {
 	}
 	switch sub {
 	case "add":
-		fs := flag.NewFlagSet("server add", flag.ContinueOnError)
-		alias := fs.String("alias", "", "unique alias (required)")
-		host := fs.String("host", "", "host or IP (required)")
-		port := fs.Int("port", 22, "ssh port")
-		user := fs.String("user", "", "login user (required)")
-		key := fs.String("key", "", "key name (required)")
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		if *alias == "" || *host == "" || *user == "" || *key == "" {
-			return fmt.Errorf("--alias, --host, --user and --key are required")
-		}
-		if err := st.AddServer(config.Server{
-			Alias: *alias, Host: *host, Port: *port, User: *user, KeyName: *key,
-		}); err != nil {
-			return err
-		}
-		if err := st.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("added server %q -> %s@%s:%d (key %s)\n", *alias, *user, *host, *port, *key)
-		return nil
-
+		return cmdServerAdd(st, rest)
 	case "ls":
-		anon := anonEnabled()
-		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "ALIAS\tHOST\tPORT\tUSER\tKEY")
-		for i, s := range st.Servers {
-			alias, host, user, keyn := s.Alias, s.Host, s.User, s.KeyName
-			if anon {
-				alias, host, user, keyn = fmt.Sprintf("server-%d", i+1), "demo.host", "user", "key"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", alias, host, s.Port, user, keyn)
-		}
-		return w.Flush()
-
+		return cmdServerLs(st)
 	case "rm":
-		fs := flag.NewFlagSet("server rm", flag.ContinueOnError)
-		alias := fs.String("alias", "", "alias to remove")
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		if err := st.RemoveServer(*alias); err != nil {
-			return err
-		}
-		if err := st.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("removed server %q\n", *alias)
-		return nil
+		return cmdServerRm(st, rest)
 	}
 	return fmt.Errorf("unknown server subcommand %q", sub)
+}
+
+func cmdServerAdd(st *config.Store, rest []string) error {
+	fs := flag.NewFlagSet("server add", flag.ContinueOnError)
+	alias := fs.String("alias", "", "unique alias (required)")
+	host := fs.String("host", "", "host or IP (required)")
+	port := fs.Int("port", 22, "ssh port")
+	user := fs.String("user", "", "login user (required)")
+	key := fs.String("key", "", "key name (required)")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if *alias == "" || *host == "" || *user == "" || *key == "" {
+		return fmt.Errorf("--alias, --host, --user and --key are required")
+	}
+	if err := st.AddServer(config.Server{
+		Alias: *alias, Host: *host, Port: *port, User: *user, KeyName: *key,
+	}); err != nil {
+		return err
+	}
+	if err := st.Save(); err != nil {
+		return err
+	}
+	fmt.Printf("added server %q -> %s@%s:%d (key %s)\n", *alias, *user, *host, *port, *key)
+	return nil
+}
+
+func cmdServerLs(st *config.Store) error {
+	anon := anonEnabled()
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "ALIAS\tHOST\tPORT\tUSER\tKEY")
+	for i, s := range st.Servers {
+		alias, host, user, keyn := s.Alias, s.Host, s.User, s.KeyName
+		if anon {
+			alias, host, user, keyn = fmt.Sprintf("server-%d", i+1), "demo.host", "user", "key"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", alias, host, s.Port, user, keyn)
+	}
+	return w.Flush()
+}
+
+func cmdServerRm(st *config.Store, rest []string) error {
+	fs := flag.NewFlagSet("server rm", flag.ContinueOnError)
+	alias := fs.String("alias", "", "alias to remove")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if err := st.RemoveServer(*alias); err != nil {
+		return err
+	}
+	if err := st.Save(); err != nil {
+		return err
+	}
+	fmt.Printf("removed server %q\n", *alias)
+	return nil
 }
 
 // ---- install ----
