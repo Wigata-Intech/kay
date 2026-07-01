@@ -228,7 +228,6 @@ func handleFleetKey(ev tui.Event, list *tui.List, interval *time.Duration, ticke
 	return false
 }
 
-// collectAll dials, collects, and closes every host concurrently.
 // collectOne dials a single host, collects its metrics, and closes the
 // connection. It never blocks the caller beyond the SSH round trip.
 func collectOne(h Host) hostState {
