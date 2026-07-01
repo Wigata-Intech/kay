@@ -40,7 +40,7 @@ type hostState struct {
 // Run shows the fleet overview until the user quits.
 func Run(hosts []Host, opts Options) error {
 	if len(hosts) == 0 {
-		return fmt.Errorf("no servers registered; add one with: kay server add ...")
+		return fmt.Errorf("no servers registered; add one with 'kay server add'")
 	}
 	if opts.Interval <= 0 {
 		opts.Interval = 5 * time.Second

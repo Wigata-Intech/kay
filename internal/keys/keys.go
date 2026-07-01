@@ -85,7 +85,7 @@ func (p *Pair) Write(dir, name string) (privPath, pubPath string, err error) {
 	if err = os.WriteFile(privPath, p.PrivatePEM, 0o600); err != nil {
 		return "", "", err
 	}
-	if err = os.WriteFile(pubPath, p.PublicAuth, 0o644); err != nil {
+	if err = os.WriteFile(pubPath, p.PublicAuth, 0o644); err != nil { //#nosec G306 -- a public key is meant to be world-readable
 		return "", "", err
 	}
 	return privPath, pubPath, nil
@@ -94,7 +94,7 @@ func (p *Pair) Write(dir, name string) (privPath, pubPath string, err error) {
 // LoadSigner reads a private key PEM file and returns an ssh.Signer for auth.
 // If the key is passphrase-protected it prompts for the passphrase (no echo).
 func LoadSigner(privPath string) (ssh.Signer, error) {
-	data, err := os.ReadFile(privPath)
+	data, err := os.ReadFile(privPath) //#nosec G304 -- path comes from kay's own key store, not untrusted input
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func promptPassphrase(name string) ([]byte, error) {
 
 // ReadPublic returns the stored authorized_keys line for display/installation.
 func ReadPublic(pubPath string) (string, error) {
-	data, err := os.ReadFile(pubPath)
+	data, err := os.ReadFile(pubPath) //#nosec G304 -- path comes from kay's own key store, not untrusted input
 	if err != nil {
 		return "", err
 	}

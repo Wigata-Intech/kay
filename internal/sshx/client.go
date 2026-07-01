@@ -153,7 +153,7 @@ func termType() string {
 // the known_hosts file, or an insecure no-op when requested.
 func hostKeyCallback(opts DialOptions) (ssh.HostKeyCallback, error) {
 	if opts.Insecure {
-		return ssh.InsecureIgnoreHostKey(), nil
+		return ssh.InsecureIgnoreHostKey(), nil //#nosec G106 -- explicit opt-in via the insecure flag; TOFU known_hosts is the default
 	}
 	path := opts.KnownHostsPath
 	if path == "" {
@@ -163,8 +163,8 @@ func hostKeyCallback(opts DialOptions) (ssh.HostKeyCallback, error) {
 		return nil, err
 	}
 	// Ensure the file exists so knownhosts.New can open it.
-	if f, err := os.OpenFile(path, os.O_CREATE, 0o600); err == nil {
-		f.Close()
+	if f, err := os.OpenFile(path, os.O_CREATE, 0o600); err == nil { //#nosec G304 -- known_hosts path is kay-controlled, not untrusted input
+		_ = f.Close()
 	}
 	verify, err := knownhosts.New(path)
 	if err != nil {
@@ -212,7 +212,7 @@ func appendKnownHost(path, hostname string, remote net.Addr, key ssh.PublicKey) 
 		}
 	}
 	line := knownhosts.Line(addrs, key) + "\n"
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600) //#nosec G304 -- known_hosts path is kay-controlled, not untrusted input
 	if err != nil {
 		return err
 	}
