@@ -30,10 +30,10 @@ testable (total coverage 66.9% → 73.7%).
   scrollable overlay were one dual-mode type gated by a `selectable` flag;
   they are now two focused widgets (`List.Render(w, h)` drops the flag), which
   removes the never-used pager branch from the list path.
-- **Raised `sshx` coverage** from ~48% to ~64% with white-box tests for the
+- **Raised `sshx` coverage** from ~48% to ~72% with white-box tests for the
   non-interactive helpers (`termType`, `classifyDialError`, `contains`,
-  `appendKnownHost`, and the `hostKeyCallback` pinning/rejection paths). The
-  remaining gap is interactive (`Shell`, host-key confirmation).
+  `appendKnownHost`, `confirmHost`, and the `hostKeyCallback` pinning/rejection
+  paths). The remaining gap is interactive (`Shell`, terminal read).
 - **Testability seams** — extracted terminal-independent cores so the
   interactive paths can be tested without a real TTY, with no behavior change:
   the host-key TOFU prompt (`confirmHost`), the key passphrase decrypt path

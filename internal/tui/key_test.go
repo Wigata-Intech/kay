@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/Wigata-Intech/kay/internal/tui"
@@ -67,5 +68,33 @@ func TestDecodeQueued(t *testing.T) {
 	ev, n = tui.Decode(b[n:])
 	if ev.Rune != 'k' || n != 1 {
 		t.Fatalf("second event: rune=%q n=%d, want 'k' n=1", ev.Rune, n)
+	}
+}
+
+// TestNewReaderReadEvent drives the Reader over an os.Pipe so ReadEvent decodes
+// a real byte stream (the constructor and read loop otherwise need a terminal).
+func TestNewReaderReadEvent(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer func() { _ = pr.Close() }()
+
+	r := tui.NewReader(pr)
+	if r == nil {
+		t.Fatal("NewReader returned nil")
+	}
+
+	go func() {
+		_, _ = pw.Write([]byte{'\t'}) // a Tab key
+		_ = pw.Close()
+	}()
+
+	ev, err := r.ReadEvent()
+	if err != nil {
+		t.Fatalf("ReadEvent: %v", err)
+	}
+	if ev.Type != tui.EventKey || ev.Key != tui.KeyTab {
+		t.Errorf("ReadEvent = {type:%d key:%d}, want Tab key", ev.Type, ev.Key)
 	}
 }
