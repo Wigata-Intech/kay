@@ -119,8 +119,14 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`).
 - CI gates every PR: `build-test` (ubuntu+macos), `lint`, `gosec`, `govulncheck`,
   and `CodeQL` (advanced setup). A PR isn't ready until all are green.
-- Releases: push a `vX.Y.Z` tag → the release workflow runs GoReleaser. Update
-  `CHANGELOG.md` (Keep a Changelog format) for the version.
+- **CHANGELOG discipline:** add an entry under `## [Unreleased]` (Keep a Changelog
+  sections: Added/Changed/Fixed/Security) for any user-facing change. The GitHub
+  Release notes are extracted from the tagged version's `CHANGELOG.md` section
+  (`release.yml` → GoReleaser `--release-notes`), **not** from commit messages — so
+  keep the changelog curated and human-readable.
+- Releases: finalize `[Unreleased]` into `## [X.Y.Z] - <date>` with compare links,
+  then push a `vX.Y.Z` tag → the release workflow runs GoReleaser. See
+  `RELEASING.md`.
 - Dependabot manages weekly gomod + github-actions bumps; those PRs are generally
   safe to merge once CI is green.
 

@@ -6,8 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Quality, tooling, and documentation hardening. No new features, no breaking
-changes — existing behavior is unchanged.
+## [0.1.1] - 2026-07-01
+
+Quality, tooling, and documentation hardening. No new features and no behavior
+changes (one concurrency bug fixed).
 
 ### Added
 
@@ -18,22 +20,23 @@ changes — existing behavior is unchanged.
   lint config; every function is now ≤15 (Go Report Card A+).
 - **CodeQL advanced setup** — a workflow + config carrying a query-filter for the
   intentional, opt-in `--insecure` host-key path.
+- **Coverage tooling** — `make cover` / `make cover-html`; a `Coverage` workflow
+  publishing a self-hosted shields badge (no external service); and a CI coverage
+  report with a 50% regression floor and a sticky per-package PR comment.
 - **`RELEASING.md`** — maintainer guide for cutting a release.
-- **Coverage tooling** — `make cover` / `make cover-html`, plus a `Coverage`
-  workflow that publishes a self-hosted shields badge (no external service) and a
-  coverage badge in the README.
 
 ### Changed
 
 - Reduced every function above cyclomatic complexity 15 to ≤15 via dispatch
   tables and helper extraction, with no change in behavior.
+- Standardized tests — external black-box packages, table-driven, positive-then-
+  error ordering — and raised total coverage from 35.6% to 66.9%.
 - Relaxed the `go.mod` directive to `go 1.26` (minor granularity).
 
 ### Fixed
 
 - **License detection** — replaced `LICENSE` with the canonical Apache-2.0 text
-  so pkg.go.dev reports Apache-2.0 instead of "UNKNOWN" (effective on the next
-  tagged release).
+  so pkg.go.dev reports Apache-2.0 instead of "UNKNOWN".
 - **SSH client data race** — `sshx.Client.Close` reassigned the `done` channel
   while the keepalive goroutine read it; `Close` now closes the channel once via
   `sync.Once` and never reassigns it, so it is race-free and idempotent.
@@ -93,5 +96,6 @@ Initial release.
 - Public-key authentication only (password used solely for assisted install);
   no telemetry.
 
-[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wigata-Intech/kay/releases/tag/v0.1.0

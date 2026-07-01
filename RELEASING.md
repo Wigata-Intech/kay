@@ -46,6 +46,10 @@ kay follows [Semantic Versioning](https://semver.org/):
    git push origin vX.Y.Z
    ```
 
+   The `release` workflow extracts this version's `CHANGELOG.md` section as the
+   GitHub Release notes (`--release-notes`), so the changelog **is** the release
+   body — there is no separate notes step. A missing section fails the release.
+
 4. **Watch the release run.** The `release` workflow runs GoReleaser and creates
    the GitHub Release with built artifacts. Confirm it succeeds:
 

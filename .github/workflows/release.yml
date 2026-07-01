@@ -20,9 +20,30 @@ jobs:
         with:
           go-version: "1.26.x"
 
+      # Release notes come from the tagged version's CHANGELOG.md section, so the
+      # curated changelog is the single source of truth (not commit messages).
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          # Emit the version's section body: start AFTER its "## [ver]" heading
+          # (GitHub already shows the tag as the release title), skip leading
+          # blank lines, and stop at the next version heading OR the trailing
+          # link-reference block (so the bottom-most version doesn't swallow the
+          # [x]: link definitions).
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" {grab=1; next}
+            grab && (/^## \[/ || /^\[[^]]+\]: /) {exit}
+            grab {
+              if (!started && $0 ~ /^[[:space:]]*$/) next
+              started=1; print
+            }
+          ' CHANGELOG.md > NOTES.md
+          echo "---- release notes for $ver ----"; cat NOTES.md
+          test -s NOTES.md || { echo "::error::no CHANGELOG.md section for $ver — finalize it before tagging"; exit 1; }
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
