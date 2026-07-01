@@ -46,12 +46,12 @@ archives:
 checksum:
   name_template: checksums.txt
 
-# Release notes come from CHANGELOG.md via `--release-notes` in release.yml, so
-# GoReleaser's own commit-derived changelog is disabled — CHANGELOG.md is the
-# single, curated source of truth (a quality/chore release shouldn't be filtered
-# down to nothing).
-changelog:
-  disable: true
+# Release notes come from the tagged version's CHANGELOG.md section, passed via
+# `--release-notes` in release.yml — that flag overrides GoReleaser's own
+# changelog, so CHANGELOG.md is the single, curated source of truth.
+# Do NOT set `changelog.disable: true`: disabling the changelog also suppresses
+# `--release-notes`, producing an empty release body. Leaving the changelog at
+# its default is fine — it only applies as a fallback when no notes file is given.
 
 release:
   draft: false
