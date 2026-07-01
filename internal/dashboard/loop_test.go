@@ -28,23 +28,24 @@ func (s *fakeScreen) Draw([]string)    { s.mu.Lock(); s.n++; s.mu.Unlock() }
 func (s *fakeScreen) draws() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
 
 // startLoop runs m.loop in a goroutine and returns its channels plus a done
-// channel carrying the loop's return value.
-func startLoop(m *model, scr screen, reset func()) (chan tui.Event, chan os.Signal, chan time.Time, <-chan error) {
+// channel carrying the loop's exitApp result.
+func startLoop(m *model, scr screen, reset func()) (chan tui.Event, chan os.Signal, chan time.Time, <-chan bool) {
 	ev := make(chan tui.Event)
 	sig := make(chan os.Signal)
 	tick := make(chan time.Time)
-	done := make(chan error, 1)
+	done := make(chan bool, 1)
 	go func() { done <- m.loop(scr, ev, sig, tick, reset) }()
 	return ev, sig, tick, done
 }
 
 func TestLoopQuitKey(t *testing.T) {
 	tests := []struct {
-		name string
-		ev   tui.Event
+		name     string
+		ev       tui.Event
+		wantExit bool // true = leave the whole app, false = leave this view
 	}{
-		{name: "q key quits", ev: tui.Event{Rune: 'q'}},
-		{name: "quit event quits", ev: tui.Event{Type: tui.EventQuit}},
+		{name: "q leaves the view", ev: tui.Event{Rune: 'q'}, wantExit: false},
+		{name: "ctrl-c leaves the app", ev: tui.Event{Type: tui.EventQuit}, wantExit: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,8 +53,8 @@ func TestLoopQuitKey(t *testing.T) {
 			scr := &fakeScreen{w: 100, h: 30}
 			ev, _, _, done := startLoop(m, scr, func() {})
 			ev <- tt.ev
-			if err := <-done; err != nil {
-				t.Errorf("loop returned %v, want nil", err)
+			if exit := <-done; exit != tt.wantExit {
+				t.Errorf("loop exitApp = %v, want %v", exit, tt.wantExit)
 			}
 			if scr.draws() == 0 {
 				t.Error("loop should draw at least once before quitting")
@@ -67,8 +68,8 @@ func TestLoopSignalQuit(t *testing.T) {
 	scr := &fakeScreen{w: 100, h: 30}
 	_, sig, _, done := startLoop(m, scr, func() {})
 	sig <- syscall.SIGTERM
-	if err := <-done; err != nil {
-		t.Errorf("loop returned %v, want nil", err)
+	if exit := <-done; !exit {
+		t.Error("SIGTERM should exit the whole app (exitApp = true)")
 	}
 }
 
@@ -134,18 +135,19 @@ func TestApplyKeyEventLoadingGuard(t *testing.T) {
 	m.tab = tabOverview
 
 	// A tab-switch key is swallowed while loading.
-	if quit := m.applyKeyEvent(tui.Event{Rune: 'L'}, func() {}); quit {
+	if quit, _ := m.applyKeyEvent(tui.Event{Rune: 'L'}, func() {}); quit {
 		t.Error("non-quit key should not quit")
 	}
 	if m.tab != tabOverview {
 		t.Errorf("tab changed to %d while loading, want %d (ignored)", m.tab, tabOverview)
 	}
-	// Quit still works while loading.
-	if !m.applyKeyEvent(tui.Event{Rune: 'q'}, func() {}) {
-		t.Error("q should quit even while loading")
+	// q quits (leaving the view, not the app).
+	if quit, exit := m.applyKeyEvent(tui.Event{Rune: 'q'}, func() {}); !quit || exit {
+		t.Errorf("q while loading = (quit %v, exit %v), want (true, false)", quit, exit)
 	}
-	if !m.applyKeyEvent(tui.Event{Type: tui.EventQuit}, func() {}) {
-		t.Error("EventQuit should quit while loading")
+	// Ctrl-C quits the whole app.
+	if quit, exit := m.applyKeyEvent(tui.Event{Type: tui.EventQuit}, func() {}); !quit || !exit {
+		t.Errorf("ctrl-c while loading = (quit %v, exit %v), want (true, true)", quit, exit)
 	}
 }
 

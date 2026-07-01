@@ -39,11 +39,11 @@ func newFleetView() *fleetView {
 	}
 }
 
-func startFleetLoop(v *fleetView, scr screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan error) {
+func startFleetLoop(v *fleetView, scr screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan *Host) {
 	ev := make(chan tui.Event)
 	tick := make(chan time.Time)
 	ticker := time.NewTicker(time.Hour) // never fires in tests; tick drives ticks
-	done := make(chan error, 1)
+	done := make(chan *Host, 1)
 	go func() { done <- v.loop(scr, ev, tick, ticker) }()
 	return ev, tick, ticker, done
 }
@@ -64,13 +64,31 @@ func TestFleetLoopQuit(t *testing.T) {
 			defer ticker.Stop()
 
 			ev <- tt.ev
-			if err := <-done; err != nil {
-				t.Errorf("loop returned %v, want nil", err)
+			if host := <-done; host != nil {
+				t.Errorf("loop returned %v, want nil (quit, not drill)", host)
 			}
 			if scr.draws() == 0 {
 				t.Error("loop should draw at least once before quitting")
 			}
 		})
+	}
+}
+
+func TestFleetLoopEnterDrillsIn(t *testing.T) {
+	v := newFleetView()
+	v.results = make(chan []hostState) // unbuffered: deterministic hand-off
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, ticker, done := startFleetLoop(v, scr)
+	defer ticker.Stop()
+
+	v.results <- []hostState{{ok: true}} // load so input is accepted and rows exist
+	ev <- tui.Event{Key: tui.KeyEnter}
+	host := <-done
+	if host == nil {
+		t.Fatal("Enter should return the selected host to drill into")
+	}
+	if host.Server.Alias != "a" {
+		t.Errorf("drilled host alias = %q, want a", host.Server.Alias)
 	}
 }
 

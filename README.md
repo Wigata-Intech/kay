@@ -158,8 +158,11 @@ State lives in `<user-config-dir>/kay/` (`config.json`, `known_hosts`, and a
 
 `kay fleet` dials every registered server concurrently and renders one live row
 per host — alias, reachability, CPU, memory, load, and Docker container counts —
-so you can scan the whole realm at a glance. It shares the same refresh controls
-as the dashboard (`r`, `+/-`, `q`) and honours `--anonymize`.
+so you can scan the whole realm at a glance. Press **Enter** on a host to drill
+straight into its full dashboard, and **Esc**/**q** to return to the overview —
+the terminal is handed over seamlessly (one screen, one input reader, no flicker),
+and **Ctrl-C** exits the whole app. It shares the same refresh controls as the
+dashboard (`r`, `+/-`, `q`) and honours `--anonymize`.
 
 ### Verifying locally with your own sshd
 
@@ -265,7 +268,7 @@ standard tools.
 | Tech debt: broaden tests (fleet, actions, sshx) | ✅ Done | v0.1.2 — testability seams; coverage 66.9% → 73.7% |
 | Tech debt: interface/type cleanups (`Runner`/`Client`, `List`/pager) | ✅ Done | v0.1.2 — `Client`=`metrics.Runner`; `List`/`Pager` split |
 | Disk explorer (`du` drill-down of what's using space) | ✅ Done | v0.2 — Enter a mount in the Disk tab to walk directories by size |
-| Fleet drill-in (open a host's dashboard from fleet) | 🚧 v0.2 | Needs shared input handling |
+| Fleet drill-in (open a host's dashboard from fleet) | ✅ Done | v0.2 — Enter a host in `kay fleet`; seamless shared-terminal handoff |
 | Customizable Overview (pinned panels) | 🚧 v0.2 | Layout config in the store |
 | Top-N containers by CPU/MEM (`docker stats`) | ✅ Done | v0.2 — `t` in the Docker tab; on-demand overlay, sort by CPU/MEM |
 | Agentic DevOps/SRE integration | 💡 Idea | Expose metrics + guarded actions as a structured tool/API so an AI agent can observe and remediate — deploy, restart/roll back, set/rotate env vars, run runbooks — gated by confirmations, `--read-only`, and an audit log |

@@ -1,6 +1,7 @@
 // Package fleet renders a live, one-row-per-host overview of all registered
-// servers, collecting metrics from each concurrently. It is a read-only view;
-// to manage a specific host, quit and run `kay dashboard --alias <alias>`.
+// servers, collecting metrics from each concurrently. Press Enter on a host to
+// drill into its full dashboard and Esc/q to return (wired by cmd/kay via
+// RunView); the overview itself is read-only.
 package fleet
 
 import (
@@ -55,8 +56,9 @@ type fleetView struct {
 	loaded     bool // true after the first collection returns (gates input)
 }
 
-// Run shows the fleet overview until the user quits. It owns the terminal
-// lifecycle, then hands the wired input and tick sources to loop.
+// Run shows the fleet overview standalone: it owns the terminal and input for the
+// whole session. Enter on a host has no effect here (drill-in needs a dashboard
+// coordinator — see cmd/kay); use RunView for that.
 func Run(hosts []Host, opts Options) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no servers registered; add one with 'kay server add'")
@@ -76,14 +78,6 @@ func Run(hosts []Host, opts Options) error {
 	}
 	defer scr.Close()
 
-	v := &fleetView{
-		hosts:    hosts,
-		states:   make([]hostState, len(hosts)),
-		interval: opts.Interval,
-		anon:     opts.Anonymize,
-		results:  make(chan []hostState, 1),
-	}
-
 	events := make(chan tui.Event, 16)
 	reader := tui.NewReader(os.Stdin)
 	go func() {
@@ -96,11 +90,39 @@ func Run(hosts []Host, opts Options) error {
 		}
 	}()
 
+	for {
+		host, err := RunView(scr, events, hosts, opts)
+		if err != nil {
+			return err
+		}
+		if host == nil {
+			return nil // user quit
+		}
+		// Standalone has no dashboard to drill into; return to the overview.
+	}
+}
+
+// RunView runs the fleet overview against an already-open screen and a shared
+// input channel, returning the host the user selected with Enter (to drill into),
+// or nil when they quit. The drill-in coordinator (cmd/kay) uses this to hand the
+// terminal to a host's dashboard and back without re-entering the alt screen.
+func RunView(scr *tui.Screen, events <-chan tui.Event, hosts []Host, opts Options) (*Host, error) {
+	if opts.Interval <= 0 {
+		opts.Interval = 5 * time.Second
+	}
+	v := &fleetView{
+		hosts:    hosts,
+		states:   make([]hostState, len(hosts)),
+		interval: opts.Interval,
+		anon:     opts.Anonymize,
+		results:  make(chan []hostState, 1),
+	}
+
 	ticker := time.NewTicker(v.interval)
 	defer ticker.Stop()
 
 	v.trigger() // kick off the first collection before entering the loop
-	return v.loop(scr, events, ticker.C, ticker)
+	return v.loop(scr, events, ticker.C, ticker), nil
 }
 
 // trigger starts a fleet collection unless one is already in flight.
@@ -117,7 +139,7 @@ func (v *fleetView) trigger() {
 // and returns when the user quits. The screen, input, and tick sources are
 // injected so it can run headless in tests. ticker is passed through to
 // handleFleetKey for interval changes; loop reads ticks from tick.
-func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) error {
+func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Host {
 	draw := func() {
 		w, h := scr.Size()
 		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, w, h, v.anon))
@@ -130,8 +152,12 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 			// Until the first collection lands, swallow input (except quit) so keys
 			// typed during the initial connect don't queue up and fire at once.
 			if v.loaded {
-				if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
-					return nil
+				if ev.Key == tui.KeyEnter {
+					if h := v.selectedHost(); h != nil {
+						return h // drill into this host's dashboard
+					}
+				} else if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
+					return nil // quit
 				}
 			} else if ev.Type == tui.EventQuit || ev.Rune == 'q' {
 				return nil
@@ -146,6 +172,17 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 			v.trigger()
 		}
 	}
+}
+
+// selectedHost returns a copy of the highlighted host, or nil when the list is
+// empty or the selection is out of range.
+func (v *fleetView) selectedHost() *Host {
+	i := v.list.Selected
+	if i < 0 || i >= len(v.hosts) {
+		return nil
+	}
+	h := v.hosts[i]
+	return &h
 }
 
 // handleFleetKey applies one input event to the fleet view. It returns true when
@@ -228,7 +265,7 @@ func render(hosts []Host, states []hostState, list *tui.List, interval time.Dura
 	out = append(out, tui.Box(fmt.Sprintf("Fleet — %d/%d online", online, len(hosts)),
 		list.Render(innerW, innerH), cw, innerH)...)
 	out = append(out, tui.Dim(tui.ClampLine(
-		"j/k select · r refresh · +/- interval · q quit   (open a host: kay dashboard --alias …)", cw)))
+		"j/k select · Enter open host · r refresh · +/- interval · q quit", cw)))
 	return tui.ClampAll(out, w, h)
 }
 

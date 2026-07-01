@@ -135,8 +135,8 @@ type screen interface {
 	Draw(lines []string)
 }
 
-// Run starts the dashboard. It owns the terminal lifecycle, then hands the wired
-// input, signal, and tick sources to loop.
+// Run starts a standalone dashboard: it owns the terminal and input for its whole
+// lifetime, then delegates to RunView.
 func Run(client Client, srv config.Server, opts Options) error {
 	if opts.Interval <= 0 {
 		opts.Interval = 3 * time.Second
@@ -155,6 +155,22 @@ func Run(client Client, srv config.Server, opts Options) error {
 	}
 	defer scr.Close()
 
+	events := make(chan tui.Event, 16)
+	go readEvents(tui.NewReader(os.Stdin), events)
+
+	_, err = RunView(scr, events, client, srv, opts)
+	return err
+}
+
+// RunView runs the dashboard against an already-open screen and a shared input
+// channel. It returns exitApp=true when the user asked to leave the whole app
+// (Ctrl-C / SIGTERM) rather than just this view (q / Esc). The fleet drill-in
+// coordinator uses this to hand off the terminal without re-entering the alt
+// screen — the caller owns scr and events for the whole session.
+func RunView(scr *tui.Screen, events <-chan tui.Event, client Client, srv config.Server, opts Options) (exitApp bool, err error) {
+	if opts.Interval <= 0 {
+		opts.Interval = 3 * time.Second
+	}
 	m := &model{srv: srv, client: client, interval: opts.Interval, readOnly: opts.ReadOnly}
 	m.redial = opts.Redial
 	m.anon = opts.Anonymize
@@ -170,22 +186,20 @@ func Run(client Client, srv config.Server, opts Options) error {
 	m.loading = true
 	m.trigger()
 
-	events := make(chan tui.Event, 16)
-	go readEvents(tui.NewReader(os.Stdin), events)
-
 	sigCh := watchSignals()
 	defer stopSignals(sigCh)
 
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 
-	return m.loop(scr, events, sigCh, ticker.C, func() { ticker.Reset(m.interval) })
+	return m.loop(scr, events, sigCh, ticker.C, func() { ticker.Reset(m.interval) }), nil
 }
 
 // loop is the dashboard's terminal-independent event loop: it redraws on every
-// event and returns when the user quits (a quit key or SIGTERM). The screen,
-// input, signal, and tick sources are injected so it can run headless in tests.
-func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal, tick <-chan time.Time, resetTick func()) error {
+// event and returns exitApp when the user quits — true for the whole app (Ctrl-C
+// / SIGTERM), false to leave just this view (q / Esc). The screen, input, signal,
+// and tick sources are injected so it can run headless in tests.
+func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal, tick <-chan time.Time, resetTick func()) bool {
 	draw := func() {
 		w, h := scr.Size()
 		scr.Draw(m.render(w, h))
@@ -195,8 +209,8 @@ func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal
 	for {
 		select {
 		case ev := <-events:
-			if m.applyKeyEvent(ev, resetTick) {
-				return nil
+			if quit, exitApp := m.applyKeyEvent(ev, resetTick); quit {
+				return exitApp
 			}
 			draw()
 		case <-tick:
@@ -217,7 +231,7 @@ func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal
 			draw()
 		case sig := <-sigCh:
 			if signalIsQuit(sig) {
-				return nil
+				return true // SIGTERM: leave the whole app
 			}
 			draw() // resize or other: re-render at the current size
 		}
@@ -261,20 +275,23 @@ func (m *model) attemptReconnect() {
 	}()
 }
 
-// applyKeyEvent handles one input event; it returns true when the loop should
-// quit. resetTick is called when the refresh interval changes.
-func (m *model) applyKeyEvent(ev tui.Event, resetTick func()) bool {
+// applyKeyEvent handles one input event. quit reports whether the loop should
+// stop; exitApp distinguishes leaving the whole app (Ctrl-C) from leaving just
+// this view (q / Esc), which the fleet drill-in coordinator uses to decide
+// between exiting and returning to the fleet. resetTick is called when the
+// refresh interval changes.
+func (m *model) applyKeyEvent(ev tui.Event, resetTick func()) (quit, exitApp bool) {
 	if ev.Type == tui.EventQuit {
-		return true
+		return true, true // Ctrl-C: leave the whole app
 	}
 	// Until the first collection lands, swallow input (except quit) so keys typed
 	// during the initial connect don't queue up and fire when data appears.
 	if m.loading {
-		return ev.Rune == 'q'
+		return ev.Rune == 'q', false
 	}
 	r := m.handleKey(ev)
 	if r.quit {
-		return true
+		return true, false // q / Esc: leave this view (back to fleet if drilled in)
 	}
 	if r.intervalChanged {
 		resetTick()
@@ -282,7 +299,7 @@ func (m *model) applyKeyEvent(ev tui.Event, resetTick func()) bool {
 	if r.refreshNow {
 		m.trigger()
 	}
-	return false
+	return false, false
 }
 
 // applyCollect installs a collection result or starts a reconnect on failure.

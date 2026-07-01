@@ -18,6 +18,7 @@ import (
 	"github.com/Wigata-Intech/kay/internal/fleet"
 	"github.com/Wigata-Intech/kay/internal/keys"
 	"github.com/Wigata-Intech/kay/internal/sshx"
+	"github.com/Wigata-Intech/kay/internal/tui"
 
 	"golang.org/x/term"
 )
@@ -440,6 +441,7 @@ func cmdFleet(args []string) error {
 	interval := fs.Duration("interval", 5*time.Second, "refresh interval")
 	insecure := fs.Bool("insecure", false, "skip host key verification")
 	color := fs.String("color", "auto", "color mode: auto|always|never")
+	readonly := fs.Bool("read-only", false, "disable destructive actions when drilling into a host")
 	anon := fs.Bool("anonymize", false, "mask aliases/hosts (for demos/screenshots)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -456,11 +458,72 @@ func cmdFleet(args []string) error {
 			Dial:   func() (*sshx.Client, error) { return dial(st, &srv, *insecure) },
 		})
 	}
-	return fleet.Run(hosts, fleet.Options{
+	fopts := fleet.Options{
 		Interval:  *interval,
 		Color:     *color,
 		Anonymize: *anon || os.Getenv("KAY_DEMO") != "",
-	})
+	}
+	// Non-interactive: plain, no drill-in.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return fleet.Run(hosts, fopts)
+	}
+	return fleetDrill(st, hosts, fopts, *insecure, *readonly)
+}
+
+// fleetDrill runs the interactive fleet overview with drill-in: it owns a single
+// screen and input reader for the whole session, so pressing Enter on a host
+// hands the terminal to that host's dashboard and back with no flicker and no
+// competing stdin readers.
+func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, insecure, readOnly bool) error {
+	tui.SetColorMode(fopts.Color)
+	scr, err := tui.NewScreen()
+	if err != nil {
+		return err
+	}
+	defer scr.Close()
+
+	events := make(chan tui.Event, 16)
+	go func() {
+		r := tui.NewReader(os.Stdin)
+		for {
+			ev, rerr := r.ReadEvent()
+			events <- ev
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		host, err := fleet.RunView(scr, events, hosts, fopts)
+		if err != nil {
+			return err
+		}
+		if host == nil {
+			return nil // user quit the fleet
+		}
+		srv := host.Server
+		client, derr := host.Dial()
+		if derr != nil {
+			continue // can't reach it right now; back to the overview
+		}
+		dopts := dashboard.Options{
+			Interval:  fopts.Interval,
+			Color:     fopts.Color,
+			ReadOnly:  readOnly,
+			Anonymize: fopts.Anonymize,
+			Redial:    func() (dashboard.Client, error) { return dial(st, &srv, insecure) },
+		}
+		exitApp, derr := dashboard.RunView(scr, events, client, srv, dopts)
+		_ = client.Close()
+		if derr != nil {
+			return derr
+		}
+		if exitApp {
+			return nil // Ctrl-C / SIGTERM inside the dashboard exits the whole app
+		}
+		// q / Esc in the dashboard: loop back to the fleet overview.
+	}
 }
 
 // ---- ls (overview) ----
