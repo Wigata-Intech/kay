@@ -122,7 +122,8 @@ Tabs    : Tab / Shift-Tab · [ / ] · H / L · or 1-5   → Overview · Processe
 Global  : r refresh now · +/- change interval · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
 Process : s cycle sort (CPU/MEM/PID/name) · x SIGTERM · X SIGKILL   (asks y/N first)
-Docker  : l logs · R restart · x stop       (restart/stop ask y/N first)
+Docker  : l logs · t stats (top by CPU/MEM) · R restart · x stop   (restart/stop ask y/N first)
+Stats   : c sort CPU · m sort MEM · r reload · j/k select · Esc back
 Disk    : Enter/l explore a mount (du) — dirs & files by size; . toggles hidden;
           j/k select · Enter/l/→ open dir · h/←/⌫ up · Esc back  (opening a file: notice)
 Detail  : j/k ↑↓ scroll · h/l ←→ pan · g/G ends · / search (n/N next) · Esc/q back
@@ -266,7 +267,7 @@ standard tools.
 | Disk explorer (`du` drill-down of what's using space) | ✅ Done | v0.2 — Enter a mount in the Disk tab to walk directories by size |
 | Fleet drill-in (open a host's dashboard from fleet) | 🚧 v0.2 | Needs shared input handling |
 | Customizable Overview (pinned panels) | 🚧 v0.2 | Layout config in the store |
-| Top-N containers by CPU/MEM (`docker stats`) | 🚧 v0.2 | Costs a slower remote call |
+| Top-N containers by CPU/MEM (`docker stats`) | ✅ Done | v0.2 — `t` in the Docker tab; on-demand overlay, sort by CPU/MEM |
 | Agentic DevOps/SRE integration | 💡 Idea | Expose metrics + guarded actions as a structured tool/API so an AI agent can observe and remediate — deploy, restart/roll back, set/rotate env vars, run runbooks — gated by confirmations, `--read-only`, and an audit log |
 
 ## Security

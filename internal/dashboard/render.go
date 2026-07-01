@@ -56,35 +56,8 @@ func (m *model) render(w, h int) []string {
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
 
-	if m.loading && !m.have {
-		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
-		out = append(out, tui.Box("", []string{"", "  connecting…", ""}, cw, innerH)...)
-		out = append(out, tui.Dim(tui.ClampLine("q quit", cw)))
-		return tui.ClampAll(out, w, h)
-	}
-
-	if m.notice != "" {
-		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
-		out = append(out, tui.Box("Notice", []string{"", "  " + m.notice, ""}, cw, innerH)...)
-		out = append(out, tui.Dim(tui.ClampLine("press any key to dismiss", cw)))
-		return tui.ClampAll(out, w, h)
-	}
-
-	if m.detail != nil {
-		body := m.renderDetailBody(innerW, innerH)
-		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
-		out = append(out, tui.Box(m.detailTitle, body, cw, innerH)...)
-		out = append(out, m.detailFooter(cw))
-		return tui.ClampAll(out, w, h)
-	}
-
-	if m.diskExpl != nil {
-		title, body := m.renderDiskExplorer(innerW, innerH)
-		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
-		out = append(out, tui.Box(title, body, cw, innerH)...)
-		out = append(out, tui.Dim(tui.ClampLine(
-			"j/k select · l/enter open · h/backspace up · . hidden · esc back", cw)))
-		return tui.ClampAll(out, w, h)
+	if out, ok := m.renderOverlay(cw, innerW, innerH, w, h); ok {
+		return out
 	}
 
 	var body []string
@@ -111,6 +84,37 @@ func (m *model) render(w, h int) []string {
 	out = append(out, tui.Box(title, body, cw, innerH)...)
 	out = append(out, m.footer(cw))
 	return tui.ClampAll(out, w, h)
+}
+
+// overlayFrame wraps a titled body between the header/tab bar and a footer line,
+// clamped to the terminal — the common frame for every full-screen overlay.
+func (m *model) overlayFrame(title string, body []string, footer string, cw, innerH, w, h int) []string {
+	out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+	out = append(out, tui.Box(title, body, cw, innerH)...)
+	out = append(out, footer)
+	return tui.ClampAll(out, w, h)
+}
+
+// renderOverlay draws a full-screen overlay when one is active (initial loading,
+// a notice, or the detail/disk/stats views) and reports whether it did.
+func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
+	dim := func(s string) string { return tui.Dim(tui.ClampLine(s, cw)) }
+	switch {
+	case m.loading && !m.have:
+		return m.overlayFrame("", []string{"", "  connecting…", ""}, dim("q quit"), cw, innerH, w, h), true
+	case m.notice != "":
+		return m.overlayFrame("Notice", []string{"", "  " + m.notice, ""}, dim("press any key to dismiss"), cw, innerH, w, h), true
+	case m.detail != nil:
+		body := m.renderDetailBody(innerW, innerH)
+		return m.overlayFrame(m.detailTitle, body, m.detailFooter(cw), cw, innerH, w, h), true
+	case m.diskExpl != nil:
+		title, body := m.renderDiskExplorer(innerW, innerH)
+		return m.overlayFrame(title, body, dim("j/k select · l/enter open · h/backspace up · . hidden · esc back"), cw, innerH, w, h), true
+	case m.dockStats != nil:
+		title, body := m.renderDockStats(innerW, innerH)
+		return m.overlayFrame(title, body, dim("j/k select · c sort cpu · m sort mem · r reload · esc back"), cw, innerH, w, h), true
+	}
+	return nil, false
 }
 
 // headerBar is the top status line: identity on the left, clock + interval on
@@ -273,9 +277,9 @@ func (m *model) keyHints() string {
 		return "j/k select · s sort · x term · X kill · Enter details · " + base
 	case tabDocker:
 		if m.readOnly {
-			return "j/k select · l logs · Enter inspect · " + base
+			return "j/k select · l logs · t stats · Enter inspect · " + base
 		}
-		return "j/k select · l logs · R restart · x stop · Enter inspect · " + base
+		return "j/k select · l logs · t stats · R restart · x stop · Enter inspect · " + base
 	case tabDisk:
 		return "j/k select · Enter/l explore (du) · " + base
 	case tabNetwork:
