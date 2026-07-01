@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Top containers (`docker stats`)** — press `t` in the dashboard's Docker tab
+  to open a live, sortable "top containers" overlay: CPU%, memory% (coloured),
+  memory usage, and net I/O per container, sorted by CPU (`c`) or memory (`m`),
+  with `r` to reload. The query is slow, so it runs on-demand and asynchronously
+  with a loading state (Esc cancels) — the periodic snapshot stays fast.
+
 - **Disk explorer** — press Enter (or `l`) on a mount in the dashboard's Disk tab
   to drill into it: directories (recursive `du` size) **and files** (size via
   `find`) are listed largest-first, showing the name and extension. `Enter`/`l`/→

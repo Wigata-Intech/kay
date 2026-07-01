@@ -25,6 +25,11 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		return keyResult{}
 	}
 
+	if m.dockStats != nil {
+		m.handleDockStatsKey(ev)
+		return keyResult{}
+	}
+
 	if m.confirm != nil {
 		if ev.Rune == 'y' || ev.Rune == 'Y' {
 			m.status = m.confirm.run()
@@ -176,6 +181,10 @@ func (m *model) procAction(ev tui.Event) {
 }
 
 func (m *model) dockAction(ev tui.Event) {
+	if ev.Rune == 't' { // top: live docker stats (no container selection needed)
+		m.openDockStats()
+		return
+	}
 	if m.dock.Selected < 0 || m.dock.Selected >= len(m.snap.Docker) {
 		return
 	}

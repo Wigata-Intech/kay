@@ -77,8 +77,9 @@ type model struct {
 	confirm     *confirmPrompt
 	detail      *tui.Pager
 	detailTitle string
-	diskExpl    *diskExplorer // non-nil while drilling into a mount with du
-	notice      string        // non-empty shows a dismissable modal message
+	diskExpl    *diskExplorer  // non-nil while drilling into a mount with du
+	dockStats   *dockStatsView // non-nil while the docker-stats overlay is open
+	notice      string         // non-empty shows a dismissable modal message
 
 	// detail-pager search + horizontal scroll state
 	searching   bool
@@ -92,6 +93,7 @@ type model struct {
 	results      chan collectResult
 	reconnected  chan reconnectResult
 	duResults    chan duResult
+	statResults  chan statResult
 	collecting   bool
 	reconnecting bool
 	loading      bool // true until the first collection returns (blocks input)
@@ -118,6 +120,12 @@ type duResult struct {
 	path string
 	out  string
 	err  error
+}
+
+// statResult carries the output of an async `docker stats` run back to the loop.
+type statResult struct {
+	out string
+	err error
 }
 
 // screen is the subset of *tui.Screen the event loop needs. It is an interface
@@ -155,6 +163,7 @@ func Run(client Client, srv config.Server, opts Options) error {
 	m.results = make(chan collectResult, 1)
 	m.reconnected = make(chan reconnectResult, 1)
 	m.duResults = make(chan duResult, 1)
+	m.statResults = make(chan statResult, 1)
 	// The first collect runs asynchronously so a slow SSH round trip doesn't block
 	// startup: the loop draws a loading screen immediately and input is ignored
 	// (except quit) until data arrives, so keys typed during startup can't queue up.
@@ -202,6 +211,9 @@ func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal
 			draw()
 		case dr := <-m.duResults:
 			m.applyDu(dr)
+			draw()
+		case sr := <-m.statResults:
+			m.applyStats(sr)
 			draw()
 		case sig := <-sigCh:
 			if signalIsQuit(sig) {
