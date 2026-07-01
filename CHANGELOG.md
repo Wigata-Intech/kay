@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Fleet drill-in** — press Enter on a host in `kay fleet` to open its full
+  dashboard, and Esc/`q` to return to the overview; Ctrl-C (or SIGTERM) exits the
+  whole app. A single screen and input reader are shared for the session, so the
+  handoff is seamless (no flicker) and there are never two goroutines competing
+  for stdin. Internally `fleet.RunView`/`dashboard.RunView` run a view against a
+  caller-owned screen + event channel; `cmd/kay` coordinates the two. `kay fleet`
+  gains `--read-only` for the drilled-in dashboard.
+- **Per-host fleet state** — the fleet overview now collects each host
+  independently and streams results in as they arrive, so one slow or unreachable
+  host no longer freezes the whole view or blocks input. The overview is
+  interactive immediately; Enter on a host that is still connecting or offline
+  shows a brief message instead of drilling in, and only ready hosts open.
+
 - **Top containers (`docker stats`)** — press `t` in the dashboard's Docker tab
   to open a live, sortable "top containers" overlay: CPU%, memory% (coloured),
   memory usage, and net I/O per container, sorted by CPU (`c`) or memory (`m`),

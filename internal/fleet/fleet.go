@@ -1,6 +1,7 @@
 // Package fleet renders a live, one-row-per-host overview of all registered
-// servers, collecting metrics from each concurrently. It is a read-only view;
-// to manage a specific host, quit and run `kay dashboard --alias <alias>`.
+// servers, collecting metrics from each concurrently. Press Enter on a host to
+// drill into its full dashboard and Esc/q to return (wired by cmd/kay via
+// RunView); the overview itself is read-only.
 package fleet
 
 import (
@@ -43,20 +44,28 @@ type screen interface {
 	Draw(lines []string)
 }
 
-// fleetView holds the mutable state of a running fleet overview.
-type fleetView struct {
-	hosts      []Host
-	states     []hostState
-	list       tui.List
-	interval   time.Duration
-	anon       bool
-	results    chan []hostState
-	collecting bool
-	loaded     bool // true after the first collection returns (gates input)
+// hostUpdate is one host's freshly collected state, streamed back to the loop as
+// soon as that host finishes — so a slow host never blocks the others.
+type hostUpdate struct {
+	index int
+	state hostState
 }
 
-// Run shows the fleet overview until the user quits. It owns the terminal
-// lifecycle, then hands the wired input and tick sources to loop.
+// fleetView holds the mutable state of a running fleet overview.
+type fleetView struct {
+	hosts    []Host
+	states   []hostState
+	list     tui.List
+	interval time.Duration
+	anon     bool
+	status   string // transient message (e.g. "still connecting"), cleared on next key
+	results  chan hostUpdate
+	inflight int // hosts still collecting in the current round
+}
+
+// Run shows the fleet overview standalone: it owns the terminal and input for the
+// whole session. Enter on a host has no effect here (drill-in needs a dashboard
+// coordinator — see cmd/kay); use RunView for that.
 func Run(hosts []Host, opts Options) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no servers registered; add one with 'kay server add'")
@@ -76,14 +85,6 @@ func Run(hosts []Host, opts Options) error {
 	}
 	defer scr.Close()
 
-	v := &fleetView{
-		hosts:    hosts,
-		states:   make([]hostState, len(hosts)),
-		interval: opts.Interval,
-		anon:     opts.Anonymize,
-		results:  make(chan []hostState, 1),
-	}
-
 	events := make(chan tui.Event, 16)
 	reader := tui.NewReader(os.Stdin)
 	go func() {
@@ -96,56 +97,107 @@ func Run(hosts []Host, opts Options) error {
 		}
 	}()
 
+	for {
+		host, err := RunView(scr, events, hosts, opts)
+		if err != nil {
+			return err
+		}
+		if host == nil {
+			return nil // user quit
+		}
+		// Standalone has no dashboard to drill into; return to the overview.
+	}
+}
+
+// RunView runs the fleet overview against an already-open screen and a shared
+// input channel, returning the host the user selected with Enter (to drill into),
+// or nil when they quit. The drill-in coordinator (cmd/kay) uses this to hand the
+// terminal to a host's dashboard and back without re-entering the alt screen.
+func RunView(scr *tui.Screen, events <-chan tui.Event, hosts []Host, opts Options) (*Host, error) {
+	if opts.Interval <= 0 {
+		opts.Interval = 5 * time.Second
+	}
+	v := &fleetView{
+		hosts:    hosts,
+		states:   make([]hostState, len(hosts)),
+		interval: opts.Interval,
+		anon:     opts.Anonymize,
+		results:  make(chan hostUpdate, len(hosts)), // buffered so no host goroutine blocks
+	}
+
 	ticker := time.NewTicker(v.interval)
 	defer ticker.Stop()
 
 	v.trigger() // kick off the first collection before entering the loop
-	return v.loop(scr, events, ticker.C, ticker)
+	return v.loop(scr, events, ticker.C, ticker), nil
 }
 
-// trigger starts a fleet collection unless one is already in flight.
+// trigger starts a fresh round: one goroutine per host, each streaming its own
+// result back as soon as it finishes. A slow or unreachable host therefore never
+// blocks the others. Skips if a round is still in flight.
 func (v *fleetView) trigger() {
-	if v.collecting {
+	if v.inflight > 0 {
 		return
 	}
-	v.collecting = true
-	hosts := v.hosts
-	go func() { v.results <- collectAll(hosts) }()
+	v.inflight = len(v.hosts)
+	for i := range v.hosts {
+		i, h := i, v.hosts[i]
+		go func() { v.results <- hostUpdate{index: i, state: collectOne(h)} }()
+	}
 }
 
 // loop is the fleet's terminal-independent event loop: it redraws on every event
-// and returns when the user quits. The screen, input, and tick sources are
-// injected so it can run headless in tests. ticker is passed through to
-// handleFleetKey for interval changes; loop reads ticks from tick.
-func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) error {
+// and returns when the user quits (nil) or drills into a host (the host). Per-host
+// results stream in independently. The screen, input, and tick sources are
+// injected so it can run headless in tests.
+func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Host {
 	draw := func() {
 		w, h := scr.Size()
-		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, w, h, v.anon))
+		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, v.status, w, h, v.anon))
 	}
 	draw()
 
 	for {
 		select {
 		case ev := <-events:
-			// Until the first collection lands, swallow input (except quit) so keys
-			// typed during the initial connect don't queue up and fire at once.
-			if v.loaded {
-				if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
-					return nil
+			v.status = "" // clear any transient message on the next keypress
+			if ev.Key == tui.KeyEnter {
+				if h := v.enterHost(); h != nil {
+					return h // drill into a ready host's dashboard
 				}
-			} else if ev.Type == tui.EventQuit || ev.Rune == 'q' {
-				return nil
+			} else if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
+				return nil // quit
 			}
 			draw()
-		case st := <-v.results:
-			v.collecting = false
-			v.loaded = true
-			v.states = st
+		case u := <-v.results:
+			v.states[u.index] = u.state
+			v.inflight--
 			draw()
 		case <-tick:
 			v.trigger()
 		}
 	}
+}
+
+// enterHost returns the highlighted host when it is ready to drill into; when it
+// is still connecting or offline it sets a transient status instead and returns
+// nil, so Enter on a not-ready host explains itself rather than doing nothing.
+func (v *fleetView) enterHost() *Host {
+	i := v.list.Selected
+	if i < 0 || i >= len(v.hosts) {
+		return nil
+	}
+	st := v.states[i]
+	if st.ok {
+		h := v.hosts[i]
+		return &h
+	}
+	if st.err != nil {
+		v.status = tui.Yellow("host is offline — can't open its dashboard")
+	} else {
+		v.status = tui.Yellow("host is still connecting — try again in a moment")
+	}
+	return nil
 }
 
 // handleFleetKey applies one input event to the fleet view. It returns true when
@@ -176,7 +228,23 @@ func handleFleetKey(ev tui.Event, list *tui.List, interval *time.Duration, ticke
 	return false
 }
 
-// collectAll dials, collects, and closes every host concurrently.
+// collectOne dials a single host, collects its metrics, and closes the
+// connection. It never blocks the caller beyond the SSH round trip.
+func collectOne(h Host) hostState {
+	c, err := h.Dial()
+	if err != nil {
+		return hostState{err: err}
+	}
+	defer c.Close()
+	s, cerr := metrics.Collect(c)
+	if cerr != nil {
+		return hostState{err: cerr}
+	}
+	return hostState{snap: s, ok: true}
+}
+
+// collectAll collects every host concurrently and returns once all finish. Used
+// by the non-interactive plain renderer, which prints a full table each cycle.
 func collectAll(hosts []Host) []hostState {
 	states := make([]hostState, len(hosts))
 	var wg sync.WaitGroup
@@ -184,25 +252,14 @@ func collectAll(hosts []Host) []hostState {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			c, err := hosts[i].Dial()
-			if err != nil {
-				states[i] = hostState{err: err}
-				return
-			}
-			defer c.Close()
-			s, cerr := metrics.Collect(c)
-			if cerr != nil {
-				states[i] = hostState{err: cerr}
-				return
-			}
-			states[i] = hostState{snap: s, ok: true}
+			states[i] = collectOne(hosts[i])
 		}(i)
 	}
 	wg.Wait()
 	return states
 }
 
-func render(hosts []Host, states []hostState, list *tui.List, interval time.Duration, w, h int, anon bool) []string {
+func render(hosts []Host, states []hostState, list *tui.List, interval time.Duration, status string, w, h int, anon bool) []string {
 	if w < 40 || h < 8 {
 		return []string{"", fmt.Sprintf("  terminal too small — need >=40x8, have %dx%d", w, h)}
 	}
@@ -227,8 +284,12 @@ func render(hosts []Host, states []hostState, list *tui.List, interval time.Dura
 		fmt.Sprintf("kay fleet · %s · every %s", time.Now().Format("15:04:05"), interval), cw))}
 	out = append(out, tui.Box(fmt.Sprintf("Fleet — %d/%d online", online, len(hosts)),
 		list.Render(innerW, innerH), cw, innerH)...)
-	out = append(out, tui.Dim(tui.ClampLine(
-		"j/k select · r refresh · +/- interval · q quit   (open a host: kay dashboard --alias …)", cw)))
+	if status != "" {
+		out = append(out, tui.ClampLine(status, cw))
+	} else {
+		out = append(out, tui.Dim(tui.ClampLine(
+			"j/k select · Enter open host · r refresh · +/- interval · q quit", cw)))
+	}
 	return tui.ClampAll(out, w, h)
 }
 
