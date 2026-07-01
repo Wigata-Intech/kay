@@ -467,20 +467,24 @@ func cmdFleet(args []string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fleet.Run(hosts, fopts)
 	}
-	return fleetDrill(st, hosts, fopts, *insecure, *readonly)
+	return fleetDrill(hosts, fopts, *readonly)
 }
 
 // fleetDrill runs the interactive fleet overview with drill-in: it owns a single
-// screen and input reader for the whole session, so pressing Enter on a host
-// hands the terminal to that host's dashboard and back with no flicker and no
-// competing stdin readers.
-func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, insecure, readOnly bool) error {
+// screen, input reader, and connection pool for the whole session, so pressing
+// Enter on a host hands the terminal to that host's dashboard and back with no
+// flicker, no competing stdin readers, and no second SSH handshake — the
+// dashboard reuses the connection the fleet already established.
+func fleetDrill(hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 	tui.SetColorMode(fopts.Color)
 	scr, err := tui.NewScreen()
 	if err != nil {
 		return err
 	}
 	defer scr.Close()
+
+	sess := fleet.NewSession(hosts)
+	defer sess.Close()
 
 	events := make(chan tui.Event, 16)
 	go func() {
@@ -495,27 +499,24 @@ func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, insec
 	}()
 
 	for {
-		host, err := fleet.RunView(scr, events, hosts, fopts)
+		sel, err := sess.RunView(scr, events, fopts)
 		if err != nil {
 			return err
 		}
-		if host == nil {
+		if sel == nil {
 			return nil // user quit the fleet
 		}
-		srv := host.Server
-		client, derr := host.Dial()
-		if derr != nil {
-			continue // can't reach it right now; back to the overview
-		}
+		srv := sel.Host.Server
 		dopts := dashboard.Options{
 			Interval:  fopts.Interval,
 			Color:     fopts.Color,
 			ReadOnly:  readOnly,
 			Anonymize: fopts.Anonymize,
-			Redial:    func() (dashboard.Client, error) { return dial(st, &srv, insecure) },
+			// No Redial: the reused connection is pool-managed and self-heals, so
+			// the dashboard just retries its metrics over the same seam.
 		}
-		exitApp, derr := dashboard.RunView(scr, events, client, srv, dopts)
-		_ = client.Close()
+		// Reuse the pooled connection; the pool owns it, so we must NOT close it here.
+		exitApp, derr := dashboard.RunView(scr, events, sel.Client, srv, dopts)
 		if derr != nil {
 			return derr
 		}

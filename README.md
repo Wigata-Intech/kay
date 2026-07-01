@@ -156,13 +156,42 @@ State lives in `<user-config-dir>/kay/` (`config.json`, `known_hosts`, and a
 
 ### Fleet
 
-`kay fleet` dials every registered server concurrently and renders one live row
-per host — alias, reachability, CPU, memory, load, and Docker container counts —
-so you can scan the whole realm at a glance. Press **Enter** on a host to drill
+`kay fleet` connects to every registered server concurrently and renders one live
+row per host — alias, reachability, CPU, memory, load, and Docker container counts
+— so you can scan the whole realm at a glance. Press **Enter** on a host to drill
 straight into its full dashboard, and **Esc**/**q** to return to the overview —
 the terminal is handed over seamlessly (one screen, one input reader, no flicker),
 and **Ctrl-C** exits the whole app. It shares the same refresh controls as the
 dashboard (`r`, `+/-`, `q`) and honours `--anonymize`.
+
+#### Persistent, self-healing connections
+
+The fleet keeps **one long-lived SSH connection per host** and reuses it for every
+refresh, rather than reconnecting each tick. This matters at scale:
+
+- **Cheap refreshes.** An SSH connection multiplexes many sessions. After the
+  first connect pays the key-exchange + public-key-auth handshake, each refresh is
+  just a new session over the existing transport — no re-handshake, negligible CPU
+  and network. The single-host `kay dashboard` has always worked this way; the
+  fleet now does too.
+- **Kinder to your servers.** Reconnecting every few seconds runs a full
+  auth/PAM cycle per connection, floods each host's `auth.log`, and — for a whole
+  fleet reconnecting in lockstep — pushes against sshd's `MaxStartups` throttle
+  (which starts *dropping* connections past its limit). Persistent connections
+  eliminate that churn.
+- **Bounded cold start.** Concurrent connects are capped (16 at a time) so
+  bringing up a large fleet can't self-throttle or exhaust local sockets.
+- **Self-healing.** A dropped connection is detected (by a periodic keepalive
+  probe or a failed refresh) and re-established automatically, with exponential
+  backoff + jitter so many hosts recovering from one blip don't stampede. A host
+  that is still connecting or offline shows a brief message on **Enter** instead of
+  drilling in; a ready host opens instantly.
+- **Zero-handshake drill-in.** Pressing **Enter** hands the dashboard the exact
+  connection the fleet already holds — no second handshake — and that dashboard
+  inherits the same self-healing.
+
+Design notes and the benchmark/load/stress methodology live in the Camelot
+technical-design vault (`docs/technical-design/[4]ssh-connection-pool.md`).
 
 ### Verifying locally with your own sshd
 
@@ -259,6 +288,7 @@ standard tools.
 | Assisted key install over an existing connection | ✅ Done | `install --push` (password bootstrap) |
 | Per-pane titles on two-column Overview | ✅ Done | System \| Top processes |
 | Multi-server fleet overview (one row per host) | ✅ Done | `kay fleet` — concurrent multi-host live table |
+| Persistent, self-healing fleet SSH connections | ✅ Done | v0.2 — one long-lived connection per host (`sshx.Pool`/`Managed`); reuse, backoff+jitter, dial cap, zero-handshake drill-in |
 | Richer Overview (docker health counts, sparklines) | ✅ Done | More than gauges |
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
 | CI quality gates (lint · gosec · govulncheck) | ✅ Done | golangci-lint 0 issues + gosec + govulncheck in CI and `make ci` |
