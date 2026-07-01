@@ -56,6 +56,13 @@ func (m *model) render(w, h int) []string {
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
 
+	if m.loading && !m.have {
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box("", []string{"", "  connecting…", ""}, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine("q quit", cw)))
+		return tui.ClampAll(out, w, h)
+	}
+
 	if m.notice != "" {
 		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
 		out = append(out, tui.Box("Notice", []string{"", "  " + m.notice, ""}, cw, innerH)...)

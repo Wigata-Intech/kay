@@ -22,6 +22,14 @@ adheres to [Semantic Versioning](https://semver.org/).
   overlay: `h/j/k/l` to move, `g/G` for ends, `H`/`L` to switch tabs, and
   `Esc`/`q` to back out.
 
+### Changed
+
+- **Responsive startup** — the dashboard's first metric collection now runs
+  asynchronously behind a "connecting…" screen instead of blocking, and both the
+  dashboard and `kay fleet` ignore input (except quit) until the first data
+  arrives. Keys pressed during the initial 1–3 s connect no longer queue up and
+  fire when the view appears.
+
 ## [0.1.2] - 2026-07-01
 
 Internal cleanup: no behavior change and no new features. Reduces duplication,
