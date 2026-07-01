@@ -5,10 +5,23 @@ package dashboard
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wigata-Intech/kay/internal/metrics"
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
+
+// pumpDu drains one async du result and applies it, standing in for the event
+// loop's m.duResults arm.
+func pumpDu(t *testing.T, m *model) {
+	t.Helper()
+	select {
+	case dr := <-m.duResults:
+		m.applyDu(dr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for du result")
+	}
+}
 
 func TestParseDu(t *testing.T) {
 	tests := []struct {
@@ -120,6 +133,7 @@ func TestDiskAction(t *testing.T) {
 	t.Run("enter on a mount opens the explorer", func(t *testing.T) {
 		m := newModel()
 		m.client = &fakeClient{out: du}
+		m.duResults = make(chan duResult, 1)
 		m.tab = tabDisk
 		m.disk.Selected = 0 // sampleSnap has one disk mounted at "/"
 
@@ -129,6 +143,13 @@ func TestDiskAction(t *testing.T) {
 		}
 		if m.diskExpl.path != "/" || m.diskExpl.root != "/" {
 			t.Errorf("explorer at %q (root %q), want /", m.diskExpl.path, m.diskExpl.root)
+		}
+		if !m.diskExpl.loading {
+			t.Error("explorer should start in the loading state")
+		}
+		pumpDu(t, m)
+		if m.diskExpl.loading {
+			t.Error("loading should clear after the scan result")
 		}
 		if len(m.diskExpl.entries) != 2 {
 			t.Fatalf("entries = %d, want 2 (children of /)", len(m.diskExpl.entries))
@@ -161,28 +182,59 @@ func TestDiskAction(t *testing.T) {
 	})
 }
 
+func TestDiskExplorerLoadingIgnoresKeys(t *testing.T) {
+	m := newModel()
+	m.client = &fakeClient{out: "400\t/\n100\t/var"}
+	m.duResults = make(chan duResult, 1)
+	m.openDiskExplorer("/") // now loading, scan in flight
+
+	// Navigation keys are ignored while loading.
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEnter})
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyDown})
+	if m.diskExpl == nil || !m.diskExpl.loading {
+		t.Fatal("keys other than close must be ignored while loading")
+	}
+	// Esc force-closes even mid-scan.
+	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEsc})
+	if m.diskExpl != nil {
+		t.Error("Esc should force-close during loading")
+	}
+	// Drain the now-stale in-flight result: applyDu must ignore it (explorer nil).
+	pumpDu(t, m)
+	if m.diskExpl != nil {
+		t.Error("a stale scan result must not reopen the explorer")
+	}
+}
+
 func TestDiskExplorerNavigation(t *testing.T) {
 	m := newModel()
 	m.snap.Disks = []metrics.Disk{{Mount: "/data"}}
 	m.client = &fakeClient{out: "400\t/data\n250\t/data/logs\n100\t/data/cache"}
+	m.duResults = make(chan duResult, 1)
 	m.openDiskExplorer("/data")
+	pumpDu(t, m) // initial scan completes
 
 	// Descend into the highlighted child (largest first => /data/logs).
 	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyEnter})
+	pumpDu(t, m)
 	if m.diskExpl.path != "/data/logs" {
 		t.Fatalf("after Enter, path = %q, want /data/logs", m.diskExpl.path)
 	}
 
 	// Ascend back to the root.
 	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyBackspace})
+	pumpDu(t, m)
 	if m.diskExpl.path != "/data" {
 		t.Fatalf("after Backspace, path = %q, want /data", m.diskExpl.path)
 	}
 
-	// Ascending at the root must not climb above the mount.
+	// Ascending at the root must not climb above the mount (no scan is started).
 	m.handleDiskExplorerKey(tui.Event{Key: tui.KeyBackspace})
 	if m.diskExpl.path != "/data" {
 		t.Errorf("Backspace at root changed path to %q, want /data (pinned)", m.diskExpl.path)
+	}
+	if m.diskExpl.loading {
+		t.Error("pinned Backspace should not start a scan")
 	}
 
 	// Esc closes the explorer.

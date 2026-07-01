@@ -90,6 +90,7 @@ type model struct {
 	// so the flags need no synchronisation.
 	results      chan collectResult
 	reconnected  chan reconnectResult
+	duResults    chan duResult
 	collecting   bool
 	reconnecting bool
 }
@@ -108,6 +109,13 @@ type collectResult struct {
 type reconnectResult struct {
 	client Client
 	err    error
+}
+
+// duResult carries the output of an async disk-explorer scan back to the loop.
+type duResult struct {
+	path string
+	out  string
+	err  error
 }
 
 // screen is the subset of *tui.Screen the event loop needs. It is an interface
@@ -144,6 +152,7 @@ func Run(client Client, srv config.Server, opts Options) error {
 	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
 	m.results = make(chan collectResult, 1)
 	m.reconnected = make(chan reconnectResult, 1)
+	m.duResults = make(chan duResult, 1)
 	m.refresh()
 
 	events := make(chan tui.Event, 16)
@@ -184,6 +193,9 @@ func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal
 		case rr := <-m.reconnected:
 			m.reconnecting = false
 			m.applyReconnect(rr)
+			draw()
+		case dr := <-m.duResults:
+			m.applyDu(dr)
 			draw()
 		case sig := <-sigCh:
 			if signalIsQuit(sig) {

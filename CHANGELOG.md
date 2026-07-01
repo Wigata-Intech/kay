@@ -12,7 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   into it with `du`: directories are listed largest-first, Enter/→ descends,
   ←/Backspace goes up (never above the mount), and Esc exits. The scan runs
   on-demand over SSH (`du -x -k -d 1`), one level at a time; paths are
-  single-quoted so names with spaces or shell metacharacters are inert.
+  single-quoted so names with spaces or shell metacharacters are inert. Scans run
+  asynchronously with a loading state, so the dashboard stays responsive on large
+  trees; keys are ignored while a scan is in flight (except Esc to cancel).
 
 ## [0.1.2] - 2026-07-01
 

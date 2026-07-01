@@ -12,11 +12,15 @@ import (
 
 // diskExplorer is a du-backed drill-down over one mount: it lists the immediate
 // children of a directory by size, and lets the user descend/ascend the tree.
+// Scans run asynchronously (du can be slow), so loading gates input while one is
+// in flight and pending records the directory being scanned.
 type diskExplorer struct {
 	path    string // directory currently listed
 	root    string // the mount we entered from; never ascend above it
 	entries []duEntry
 	list    tui.List
+	loading bool
+	pending string // directory whose scan is in flight (matched in applyDu)
 }
 
 // duEntry is one child directory (or file) with its apparent size in KiB.
@@ -77,19 +81,39 @@ func splitDuLine(line string) (size, p string) {
 	return "", ""
 }
 
-// openDiskExplorer starts a drill-down rooted at mount.
+// openDiskExplorer starts a drill-down rooted at mount and kicks off its scan.
 func (m *model) openDiskExplorer(mount string) {
 	m.diskExpl = &diskExplorer{path: mount, root: mount}
-	m.loadDiskLevel()
+	m.startDuLoad(mount)
 }
 
-// loadDiskLevel runs du for the current directory and rebuilds the row list.
-func (m *model) loadDiskLevel() {
-	out, err := m.client.Run(duCommand(m.diskExpl.path))
-	if err != nil {
-		m.status = tui.Red("du failed: " + tui.FirstLine(err.Error()))
+// startDuLoad runs du for p in a goroutine so the event loop never blocks (du can
+// take seconds on large trees). The result is delivered on m.duResults and
+// applied by applyDu. Only one scan is in flight at a time, gated by loading.
+func (m *model) startDuLoad(p string) {
+	m.diskExpl.loading = true
+	m.diskExpl.pending = p
+	cl := m.client // snapshot: reconnect may replace m.client later
+	ch := m.duResults
+	go func() {
+		out, err := cl.Run(duCommand(p))
+		ch <- duResult{path: p, out: out, err: err}
+	}()
+}
+
+// applyDu installs a completed scan. It ignores stale results (the explorer was
+// closed, or the user navigated elsewhere) by matching the pending path.
+func (m *model) applyDu(dr duResult) {
+	if m.diskExpl == nil || !m.diskExpl.loading || dr.path != m.diskExpl.pending {
+		return
 	}
-	m.diskExpl.entries = parseDu(out, m.diskExpl.path)
+	m.diskExpl.loading = false
+	m.diskExpl.pending = ""
+	if dr.err != nil {
+		m.status = tui.Red("du failed: " + tui.FirstLine(dr.err.Error()))
+	}
+	m.diskExpl.path = dr.path
+	m.diskExpl.entries = parseDu(dr.out, dr.path)
 	rows := make([]string, len(m.diskExpl.entries))
 	for i, e := range m.diskExpl.entries {
 		rows[i] = fmt.Sprintf("%10s  %s", humanKB(uint64(e.kb)), path.Base(e.path))
@@ -101,19 +125,26 @@ func (m *model) loadDiskLevel() {
 // handleDiskExplorerKey drives the drill-down: descend into a directory, ascend
 // toward (but not above) the mount, or close.
 func (m *model) handleDiskExplorerKey(ev tui.Event) {
+	// While a scan is in flight, ignore everything except a force-close so queued
+	// keystrokes don't stack up and fire when the (possibly slow) du returns.
+	if m.diskExpl.loading {
+		if ev.Key == tui.KeyEsc || ev.Rune == 'q' {
+			m.diskExpl = nil
+		}
+		return
+	}
+
 	switch {
 	case ev.Key == tui.KeyEsc, ev.Rune == 'q':
 		m.diskExpl = nil
 	case ev.Key == tui.KeyEnter, ev.Key == tui.KeyRight, ev.Rune == 'l':
 		if e, ok := m.selectedDuEntry(); ok {
-			m.diskExpl.path = e.path
-			m.loadDiskLevel()
+			m.startDuLoad(e.path)
 		}
 	case ev.Key == tui.KeyBackspace, ev.Key == tui.KeyLeft, ev.Rune == 'h':
 		if parent := path.Dir(m.diskExpl.path); parent != m.diskExpl.path &&
 			withinRoot(parent, m.diskExpl.root) {
-			m.diskExpl.path = parent
-			m.loadDiskLevel()
+			m.startDuLoad(parent)
 		}
 	default:
 		handleListNav(&m.diskExpl.list, ev)
@@ -142,7 +173,12 @@ func withinRoot(p, root string) bool {
 }
 
 // renderDiskExplorer builds the drill-down view for the given inner viewport.
+// While a scan is in flight it shows a scanning notice instead of the list.
 func (m *model) renderDiskExplorer(width, height int) (title string, body []string) {
+	if m.diskExpl.loading {
+		title = "Disk · scanning…"
+		return title, []string{"", tui.Dim("  scanning " + m.diskExpl.pending + " … (esc to cancel)")}
+	}
 	title = "Disk · " + m.diskExpl.path
 	m.diskExpl.list.Header = fmt.Sprintf("%10s  %s", "SIZE", "NAME")
 	body = m.diskExpl.list.Render(width, height)
