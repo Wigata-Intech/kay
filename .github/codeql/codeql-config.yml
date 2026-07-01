@@ -1,0 +1,21 @@
+name: "kay CodeQL config"
+
+# kay runs CodeQL via advanced setup (this repo's .github/workflows/codeql.yml)
+# rather than GitHub default setup, solely so we can carry the query-filter
+# below. Keep the default query suites otherwise — scanning stays strict.
+queries:
+  - uses: security-extended
+
+query-filters:
+  # go/insecure-hostkeycallback flags ssh.InsecureIgnoreHostKey() in
+  # internal/sshx/client.go hostKeyCallback(). That call is intentional and
+  # opt-in: it is reached ONLY behind the `--insecure` flag for lab/throwaway
+  # hosts. The default path is TOFU known_hosts verification. gosec already
+  # covers it with a //#nosec G106 suppression, but CodeQL does not honor
+  # //#nosec, so we exclude the single query here.
+  #
+  # Trade-off (accept knowingly): this suppresses the query REPO-WIDE, so a
+  # genuinely-insecure HostKeyCallback added elsewhere later would NOT be
+  # flagged. Review new host-key handling by hand.
+  - exclude:
+      id: go/insecure-hostkeycallback
