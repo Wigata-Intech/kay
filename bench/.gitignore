@@ -1,0 +1,5 @@
+# benchmark run artifacts
+bench.txt
+*.out
+*.prof
+*.pprof
