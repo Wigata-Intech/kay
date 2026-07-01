@@ -1,68 +1,117 @@
-package tui
+package tui_test
 
 import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
 func TestVisibleWidthIgnoresSGR(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = true
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = true
+	defer func() { tui.ColorEnabled = old }()
 
-	plain := "hello"
-	colored := Red("hello")
-	if VisibleWidth(colored) != len(plain) {
-		t.Errorf("VisibleWidth(colored) = %d, want %d", VisibleWidth(colored), len(plain))
+	// Colored strings are built after enabling colour so SGR escapes are present.
+	tests := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"plain", "hello", 5},
+		{"fully colored", tui.Red("hello"), 5},
+		{"mixed", "ab" + tui.Green("cd") + "ef", 6},
 	}
-	if VisibleWidth("ab"+Green("cd")+"ef") != 6 {
-		t.Errorf("mixed width = %d, want 6", VisibleWidth("ab"+Green("cd")+"ef"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tui.VisibleWidth(tt.in); got != tt.want {
+				t.Errorf("VisibleWidth(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestTruncateAndPad(t *testing.T) {
-	if got := Truncate("hello world", 5); got != "hell…" {
-		t.Errorf("Truncate = %q", got)
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name  string
+		in    string
+		width int
+		want  string
+	}{
+		{"truncates with ellipsis", "hello world", 5, "hell…"},
+		{"no-op when it fits", "hi", 5, "hi"},
 	}
-	if got := Truncate("hi", 5); got != "hi" {
-		t.Errorf("Truncate noop = %q", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tui.Truncate(tt.in, tt.width); got != tt.want {
+				t.Errorf("Truncate(%q, %d) = %q, want %q", tt.in, tt.width, got, tt.want)
+			}
+		})
 	}
-	if got := Pad("hi", 5); got != "hi   " || utf8.RuneCountInString(got) != 5 {
-		t.Errorf("Pad = %q", got)
+}
+
+func TestPad(t *testing.T) {
+	tests := []struct {
+		name  string
+		pad   func(string, int) string
+		in    string
+		width int
+		want  string
+	}{
+		{"Pad right-fills", tui.Pad, "hi", 5, "hi   "},
+		{"PadLeft left-fills", tui.PadLeft, "42", 5, "   42"},
 	}
-	if got := PadLeft("42", 5); got != "   42" {
-		t.Errorf("PadLeft = %q", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.pad(tt.in, tt.width)
+			if got != tt.want {
+				t.Errorf("pad(%q, %d) = %q, want %q", tt.in, tt.width, got, tt.want)
+			}
+			if n := utf8.RuneCountInString(got); n != tt.width {
+				t.Errorf("pad(%q, %d) width = %d runes, want %d", tt.in, tt.width, n, tt.width)
+			}
+		})
 	}
 }
 
 func TestPadVisibleIgnoresSGR(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = true
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = true
+	defer func() { tui.ColorEnabled = old }()
 
-	got := PadVisible(Red("ab"), 5) // visible "ab" -> pad to 5
-	if VisibleWidth(got) != 5 {
-		t.Errorf("PadVisible width = %d, want 5 (%q)", VisibleWidth(got), got)
+	tests := []struct {
+		name      string
+		in        string
+		width     int
+		wantWidth int
+	}{
+		{"pads to visible width", tui.Red("ab"), 5, 5},
+		{"clamps when too long", "abcdefgh", 4, 4},
 	}
-	// Too long: clamped to width.
-	if w := VisibleWidth(PadVisible("abcdefgh", 4)); w != 4 {
-		t.Errorf("PadVisible clamp width = %d, want 4", w)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if w := tui.VisibleWidth(tui.PadVisible(tt.in, tt.width)); w != tt.wantWidth {
+				t.Errorf("PadVisible(%q, %d) visible width = %d, want %d", tt.in, tt.width, w, tt.wantWidth)
+			}
+		})
 	}
 }
 
+// TestBoxDimensions checks structural invariants of a rendered box; the
+// assertions are a single sequence over one Box output, not independent cases.
 func TestBoxDimensions(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = false
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = false
+	defer func() { tui.ColorEnabled = old }()
 
-	lines := Box("Processes", []string{"row1", "row2"}, 20, 4)
+	lines := tui.Box("Processes", []string{"row1", "row2"}, 20, 4)
 	if len(lines) != 6 { // top + 4 inner + bottom
 		t.Fatalf("box lines = %d, want 6", len(lines))
 	}
 	for i, l := range lines {
-		if VisibleWidth(l) != 20 {
-			t.Errorf("box line %d width = %d, want 20 (%q)", i, VisibleWidth(l), l)
+		if w := tui.VisibleWidth(l); w != 20 {
+			t.Errorf("box line %d width = %d, want 20 (%q)", i, w, l)
 		}
 	}
 	if !strings.Contains(lines[0], "Processes") {
@@ -71,13 +120,12 @@ func TestBoxDimensions(t *testing.T) {
 }
 
 func TestClampLineKeepsWidth(t *testing.T) {
-	old := ColorEnabled
-	ColorEnabled = true
-	defer func() { ColorEnabled = old }()
+	old := tui.ColorEnabled
+	tui.ColorEnabled = true
+	defer func() { tui.ColorEnabled = old }()
 
-	line := "abc" + Red("defghij")
-	clamped := ClampLine(line, 5)
-	if VisibleWidth(clamped) != 5 {
-		t.Errorf("clamped visible width = %d, want 5 (%q)", VisibleWidth(clamped), clamped)
+	clamped := tui.ClampLine("abc"+tui.Red("defghij"), 5)
+	if w := tui.VisibleWidth(clamped); w != 5 {
+		t.Errorf("clamped visible width = %d, want 5 (%q)", w, clamped)
 	}
 }

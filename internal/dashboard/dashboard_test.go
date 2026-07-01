@@ -1,3 +1,8 @@
+// White-box tests (package dashboard, not dashboard_test): these exercise the
+// unexported model and its event handling (render, handleKey, openDetail, the
+// tab constants). Black-boxing them would mean exporting the whole TUI model and
+// event loop purely for testing, which we don't want — so this file is the
+// deliberate exception to the black-box convention used in the other packages.
 package dashboard
 
 import (

@@ -1,8 +1,10 @@
-package metrics
+package metrics_test
 
 import (
 	"math"
 	"testing"
+
+	"github.com/Wigata-Intech/kay/internal/metrics"
 )
 
 // fixture mirrors the marker-delimited shape produced by remoteScript, using
@@ -45,7 +47,7 @@ def456|db|postgres:16|Up 5 minutes
 func approx(a, b float64) bool { return math.Abs(a-b) < 0.001 }
 
 func TestParseFixture(t *testing.T) {
-	s, err := Parse(fixture)
+	s, err := metrics.Parse(fixture)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestParseFixture(t *testing.T) {
 	})
 
 	t.Run("net", func(t *testing.T) {
-		var eth0 *NetIface
+		var eth0 *metrics.NetIface
 		for i := range s.Net {
 			if s.Net[i].Name == "eth0" {
 				eth0 = &s.Net[i]
@@ -116,19 +118,39 @@ func TestParseFixture(t *testing.T) {
 	})
 }
 
-func TestParseDockerAbsent(t *testing.T) {
-	s, _ := Parse("@@DOCKER\nABSENT\n@@END\n")
-	if s.DockerPresent || len(s.Docker) != 0 {
-		t.Errorf("expected docker absent, got present=%v n=%d", s.DockerPresent, len(s.Docker))
+// TestParseDockerPresence covers the Docker marker: present containers first,
+// then the absent case.
+func TestParseDockerPresence(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		wantPresent bool
+		wantCount   int
+	}{
+		{"present", "@@DOCKER\nPRESENT\nabc123|web|nginx:latest|Up 2 hours\n@@END\n", true, 1},
+		{"absent", "@@DOCKER\nABSENT\n@@END\n", false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := metrics.Parse(tt.in)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if s.DockerPresent != tt.wantPresent || len(s.Docker) != tt.wantCount {
+				t.Errorf("present=%v n=%d, want present=%v n=%d",
+					s.DockerPresent, len(s.Docker), tt.wantPresent, tt.wantCount)
+			}
+		})
 	}
 }
 
+// fakeRunner returns canned output, standing in for an SSH client.
 type fakeRunner struct{ out string }
 
 func (f fakeRunner) Run(string) (string, error) { return f.out, nil }
 
 func TestCollectViaRunner(t *testing.T) {
-	s, err := Collect(fakeRunner{out: fixture})
+	s, err := metrics.Collect(fakeRunner{out: fixture})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}

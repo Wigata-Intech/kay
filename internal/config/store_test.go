@@ -1,29 +1,34 @@
-package config
+package config_test
 
 import (
 	"testing"
+
+	"github.com/Wigata-Intech/kay/internal/config"
 )
 
+// TestStoreRoundTrip is the happy path: load an empty store, add a key and a
+// server, save, reload, and read them back. The steps share state, so this is
+// an ordered sequence rather than a table.
 func TestStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	st, err := LoadFrom(dir)
+	st, err := config.LoadFrom(dir)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if len(st.Keys) != 0 || len(st.Servers) != 0 {
 		t.Fatalf("expected empty store on first load")
 	}
-	if err := st.AddKey(Key{Name: "default", Type: KeyEd25519, Fingerprint: "SHA256:x"}); err != nil {
+	if err := st.AddKey(config.Key{Name: "default", Type: config.KeyEd25519, Fingerprint: "SHA256:x"}); err != nil {
 		t.Fatalf("add key: %v", err)
 	}
-	if err := st.AddServer(Server{Alias: "prod", Host: "10.0.0.1", Port: 22, User: "ubuntu", KeyName: "default"}); err != nil {
+	if err := st.AddServer(config.Server{Alias: "prod", Host: "10.0.0.1", Port: 22, User: "ubuntu", KeyName: "default"}); err != nil {
 		t.Fatalf("add server: %v", err)
 	}
 	if err := st.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	st2, err := LoadFrom(dir)
+	st2, err := config.LoadFrom(dir)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -39,25 +44,47 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDuplicateAndMissing(t *testing.T) {
-	st, _ := LoadFrom(t.TempDir())
-	_ = st.AddKey(Key{Name: "k"})
-	if err := st.AddKey(Key{Name: "k"}); err == nil {
-		t.Error("expected duplicate key error")
+// TestStoreValidation drives add/remove against one shared store. Ordering is
+// dictated by store state (duplicate/missing checks need a prior valid entry),
+// so the positive steps that establish state come first, then the error cases,
+// then the final remove sequence.
+func TestStoreValidation(t *testing.T) {
+	st, err := config.LoadFrom(t.TempDir())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if err := st.AddServer(Server{Alias: "a", KeyName: "missing"}); err == nil {
-		t.Error("expected unknown-key error")
+
+	steps := []struct {
+		name    string
+		op      func() error
+		wantErr bool
+	}{
+		// positive: establish a key and a server
+		{"add key", func() error { return st.AddKey(config.Key{Name: "k"}) }, false},
+		{"add server with valid key", func() error {
+			return st.AddServer(config.Server{Alias: "a", KeyName: "k"})
+		}, false},
+		// error: duplicates and dangling references are rejected
+		{"duplicate key", func() error { return st.AddKey(config.Key{Name: "k"}) }, true},
+		{"server references missing key", func() error {
+			return st.AddServer(config.Server{Alias: "b", KeyName: "missing"})
+		}, true},
+		{"duplicate alias", func() error {
+			return st.AddServer(config.Server{Alias: "a", KeyName: "k"})
+		}, true},
+		// positive then error: remove the server, then removing again fails
+		{"remove server", func() error { return st.RemoveServer("a") }, false},
+		{"remove missing server", func() error { return st.RemoveServer("a") }, true},
 	}
-	if err := st.AddServer(Server{Alias: "a", KeyName: "k"}); err != nil {
-		t.Errorf("valid add failed: %v", err)
-	}
-	if err := st.AddServer(Server{Alias: "a", KeyName: "k"}); err == nil {
-		t.Error("expected duplicate alias error")
-	}
-	if err := st.RemoveServer("a"); err != nil {
-		t.Errorf("remove: %v", err)
-	}
-	if err := st.RemoveServer("a"); err == nil {
-		t.Error("expected missing-server error on second remove")
+	for _, tt := range steps {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.op()
+			if tt.wantErr && err == nil {
+				t.Errorf("%s: got nil error, want error", tt.name)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("%s: unexpected error: %v", tt.name, err)
+			}
+		})
 	}
 }
