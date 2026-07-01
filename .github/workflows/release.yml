@@ -22,6 +22,8 @@ jobs:
 
       # Release notes come from the tagged version's CHANGELOG.md section, so the
       # curated changelog is the single source of truth (not commit messages).
+      # Written to $RUNNER_TEMP (outside the repo) so GoReleaser's clean-tree
+      # check doesn't see it as an untracked file and abort with "dirty state".
       - name: Extract release notes from CHANGELOG.md
         run: |
           ver="${GITHUB_REF_NAME#v}"
@@ -37,13 +39,13 @@ jobs:
               if (!started && $0 ~ /^[[:space:]]*$/) next
               started=1; print
             }
-          ' CHANGELOG.md > NOTES.md
-          echo "---- release notes for $ver ----"; cat NOTES.md
-          test -s NOTES.md || { echo "::error::no CHANGELOG.md section for $ver — finalize it before tagging"; exit 1; }
+          ' CHANGELOG.md > "$RUNNER_TEMP/NOTES.md"
+          echo "---- release notes for $ver ----"; cat "$RUNNER_TEMP/NOTES.md"
+          test -s "$RUNNER_TEMP/NOTES.md" || { echo "::error::no CHANGELOG.md section for $ver — finalize it before tagging"; exit 1; }
 
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean --release-notes=NOTES.md
+          args: release --clean --release-notes=${{ runner.temp }}/NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
