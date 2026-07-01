@@ -99,9 +99,20 @@ jobs:
           pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           echo "pct=$pct" >> "$GITHUB_OUTPUT"
           # Per-package breakdown for the PR comment (tests are cached here).
+          # Extract pkg + the % after "coverage:" (field positions vary with
+          # ok/cached/time prefixes, so scan fields instead of using $NF).
           {
             echo 'pkgs<<PKGS'
-            go test -cover ./... 2>&1 | awk '/coverage:/ {printf "  %-40s %s\n", $2, $NF}'
+            go test -cover ./... 2>&1 | awk '
+              /coverage:/ {
+                pkg=""; pct="";
+                for (i=1; i<=NF; i++) {
+                  if ($i ~ /Wigata-Intech\/kay/) pkg=$i;
+                  if ($i=="coverage:") pct=$(i+1);
+                }
+                sub(".*/kay/", "", pkg);
+                printf "  %-20s %s\n", pkg, pct;
+              }'
             echo 'PKGS'
           } >> "$GITHUB_OUTPUT"
           echo "Total coverage: ${pct}%"
