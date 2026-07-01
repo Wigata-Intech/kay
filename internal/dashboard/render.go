@@ -64,6 +64,15 @@ func (m *model) render(w, h int) []string {
 		return tui.ClampAll(out, w, h)
 	}
 
+	if m.diskExpl != nil {
+		title, body := m.renderDiskExplorer(innerW, innerH)
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box(title, body, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine(
+			"↑/↓ select · enter/→ open · ←/backspace up · esc back", cw)))
+		return tui.ClampAll(out, w, h)
+	}
+
 	var body []string
 	title := tabNames[m.tab]
 	switch m.tab {
@@ -253,7 +262,9 @@ func (m *model) keyHints() string {
 			return "j/k select · l logs · Enter inspect · " + base
 		}
 		return "j/k select · l logs · R restart · x stop · Enter inspect · " + base
-	case tabNetwork, tabDisk:
+	case tabDisk:
+		return "j/k select · Enter explore (du) · " + base
+	case tabNetwork:
 		return "j/k select · " + base
 	}
 	return base

@@ -77,6 +77,7 @@ type model struct {
 	confirm     *confirmPrompt
 	detail      *tui.Pager
 	detailTitle string
+	diskExpl    *diskExplorer // non-nil while drilling into a mount with du
 
 	// detail-pager search + horizontal scroll state
 	searching   bool

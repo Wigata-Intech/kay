@@ -15,6 +15,11 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		return m.handleDetailKey(ev)
 	}
 
+	if m.diskExpl != nil {
+		m.handleDiskExplorerKey(ev)
+		return keyResult{}
+	}
+
 	if m.confirm != nil {
 		if ev.Rune == 'y' || ev.Rune == 'Y' {
 			m.status = m.confirm.run()
@@ -36,8 +41,21 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		m.procAction(ev)
 	case tabDocker:
 		m.dockAction(ev)
+	case tabDisk:
+		m.diskAction(ev)
 	}
 	return keyResult{}
+}
+
+// diskAction opens the du drill-down when Enter is pressed on a mount.
+func (m *model) diskAction(ev tui.Event) {
+	if ev.Key != tui.KeyEnter {
+		return
+	}
+	if m.disk.Selected < 0 || m.disk.Selected >= len(m.snap.Disks) {
+		return
+	}
+	m.openDiskExplorer(m.snap.Disks[m.disk.Selected].Mount)
 }
 
 // handleGlobalKey processes keys valid on every tab (quit, tab switching,

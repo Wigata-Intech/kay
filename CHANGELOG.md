@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Disk explorer** — press Enter on a mount in the dashboard's Disk tab to drill
+  into it with `du`: directories are listed largest-first, Enter/→ descends,
+  ←/Backspace goes up (never above the mount), and Esc exits. The scan runs
+  on-demand over SSH (`du -x -k -d 1`), one level at a time; paths are
+  single-quoted so names with spaces or shell metacharacters are inert.
+
 ## [0.1.2] - 2026-07-01
 
 Internal cleanup: no behavior change and no new features. Reduces duplication,

@@ -123,6 +123,7 @@ Global  : r refresh now · +/- change interval · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
 Process : s cycle sort (CPU/MEM/PID/name) · x SIGTERM · X SIGKILL   (asks y/N first)
 Docker  : l logs · R restart · x stop       (restart/stop ask y/N first)
+Disk    : Enter explore a mount (du) · ↑↓ select · Enter/→ open · ←/⌫ up · Esc back
 Detail  : j/k ↑↓ scroll · h/l ←→ pan · g/G ends · / search (n/N next) · Esc/q back
 ```
 
@@ -254,14 +255,14 @@ standard tools.
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
 | CI quality gates (lint · gosec · govulncheck) | ✅ Done | golangci-lint 0 issues + gosec + govulncheck in CI and `make ci` |
 | Tech debt: reduce cyclomatic complexity (gocyclo) | ✅ Done | Every function ≤15; `gocyclo` gate enforces it — Go Report Card A+ |
-| Tech debt: shared UI helpers (dedupe dashboard/fleet) | 🧹 v0.2 | Remove duplicated formatting/colour/screen helpers |
-| Tech debt: split large files (`dashboard.go`, `main.go`) | 🧹 v0.2 | Readability; keep `cmd` thin |
-| Tech debt: broaden tests (fleet, actions, sshx) | 🧹 v0.2 | Coverage for confident refactors |
-| Tech debt: interface/type cleanups (`Runner`/`Client`, `List`/pager) | 🧹 v0.2 | Minor tidy |
-| Disk explorer (`du` drill-down of what's using space) | 💡 Idea | Beyond per-mount usage |
-| Fleet drill-in (open a host's dashboard from fleet) | 💡 Idea | Needs shared input handling |
-| Customizable Overview (pinned panels) | 💡 Idea | Layout config in the store |
-| Top-N containers by CPU/MEM (`docker stats`) | 💡 Idea | Costs a slower remote call |
+| Tech debt: shared UI helpers (dedupe dashboard/fleet) | ✅ Done | v0.1.2 — `tui.SetColorMode`/`ClampAll`/`FirstLine`/`ThreshColor` |
+| Tech debt: split large files (`dashboard.go`, `main.go`) | ✅ Done | v0.1.2 — `dashboard.go` → input/render/format |
+| Tech debt: broaden tests (fleet, actions, sshx) | ✅ Done | v0.1.2 — testability seams; coverage 66.9% → 73.7% |
+| Tech debt: interface/type cleanups (`Runner`/`Client`, `List`/pager) | ✅ Done | v0.1.2 — `Client`=`metrics.Runner`; `List`/`Pager` split |
+| Disk explorer (`du` drill-down of what's using space) | ✅ Done | v0.2 — Enter a mount in the Disk tab to walk directories by size |
+| Fleet drill-in (open a host's dashboard from fleet) | 🚧 v0.2 | Needs shared input handling |
+| Customizable Overview (pinned panels) | 🚧 v0.2 | Layout config in the store |
+| Top-N containers by CPU/MEM (`docker stats`) | 🚧 v0.2 | Costs a slower remote call |
 | Agentic DevOps/SRE integration | 💡 Idea | Expose metrics + guarded actions as a structured tool/API so an AI agent can observe and remediate — deploy, restart/roll back, set/rotate env vars, run runbooks — gated by confirmations, `--read-only`, and an audit log |
 
 ## Security
