@@ -1,6 +1,7 @@
 // White-box: exercises fleet.go directly — the pure helpers (rows, render,
 // statCell, humanDurShort), the collection helpers, and the fleetView event loop
-// (with an injected fake screen + channels), plus the unexported hostState type.
+// (with an injected fake screen + channels), plus the unexported hostState type
+// and collector seam.
 package fleet
 
 import (
@@ -16,9 +17,34 @@ import (
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
-// failDial is a Dial that always errors, so collection returns immediately
-// without a real connection.
-func failDial() (*sshx.Client, error) { return nil, errors.New("dial refused") }
+// fakeConn is a scriptable collector: it reports a fixed connection state/error
+// and returns canned output from Run, so the fleet can be exercised without a
+// real SSH connection. ran, when set, is signalled on each Run.
+type fakeConn struct {
+	state  sshx.ConnState
+	err    error
+	out    string
+	runErr error
+	ran    chan struct{}
+
+	mu   sync.Mutex
+	runs int
+}
+
+func (f *fakeConn) Run(string) (string, error) {
+	f.mu.Lock()
+	f.runs++
+	f.mu.Unlock()
+	if f.ran != nil {
+		select {
+		case f.ran <- struct{}{}:
+		default:
+		}
+	}
+	return f.out, f.runErr
+}
+func (f *fakeConn) State() sshx.ConnState { return f.state }
+func (f *fakeConn) Err() error            { return f.err }
 
 // noColor disables tui coloring for the duration of a test so string
 // assertions can match plain text, restoring the prior value afterwards.
@@ -197,24 +223,39 @@ func TestHandleFleetKey(t *testing.T) {
 	}
 }
 
-func TestCollectOne(t *testing.T) {
-	st := collectOne(Host{Server: config.Server{Alias: "x"}, Dial: failDial})
-	if st.ok || st.err == nil {
-		t.Fatalf("collectOne with a failing dial = %+v, want an error state", st)
+func TestCollect(t *testing.T) {
+	tests := []struct {
+		name    string
+		conn    *fakeConn
+		wantOK  bool
+		wantErr bool
+	}{
+		{name: "ready collects metrics", conn: &fakeConn{state: sshx.StateReady}, wantOK: true},
+		{name: "ready but run fails", conn: &fakeConn{state: sshx.StateReady, runErr: errors.New("boom")}, wantErr: true},
+		{name: "broken reports its error", conn: &fakeConn{state: sshx.StateBroken, err: errors.New("dial refused")}, wantErr: true},
+		{name: "connecting has neither data nor error", conn: &fakeConn{state: sshx.StateConnecting}},
 	}
-	if !strings.Contains(st.err.Error(), "dial refused") {
-		t.Errorf("err = %v, want the dial error", st.err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := collect(tt.conn)
+			if st.ok != tt.wantOK {
+				t.Errorf("ok = %v, want %v (%+v)", st.ok, tt.wantOK, st)
+			}
+			if (st.err != nil) != tt.wantErr {
+				t.Errorf("err = %v, want error=%v", st.err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestCollectAll(t *testing.T) {
-	hosts := []Host{
-		{Server: config.Server{Alias: "a"}, Dial: failDial},
-		{Server: config.Server{Alias: "b"}, Dial: failDial},
+	conns := []collector{
+		&fakeConn{state: sshx.StateBroken, err: errors.New("no")},
+		&fakeConn{state: sshx.StateBroken, err: errors.New("no")},
 	}
-	states := collectAll(hosts)
-	if len(states) != len(hosts) {
-		t.Fatalf("collectAll len = %d, want %d", len(states), len(hosts))
+	states := collectAll(conns)
+	if len(states) != len(conns) {
+		t.Fatalf("collectAll len = %d, want %d", len(states), len(conns))
 	}
 	for i, st := range states {
 		if st.err == nil {
@@ -297,25 +338,22 @@ func (s *fakeScreen) Size() (int, int) { return s.w, s.h }
 func (s *fakeScreen) Draw([]string)    { s.mu.Lock(); s.n++; s.mu.Unlock() }
 func (s *fakeScreen) draws() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
 
-// newFleetView builds a one-host view whose Dial always fails, so a collection
-// returns quickly without a real connection.
-func newFleetView() *fleetView {
+// newFleetView builds a one-host view backed by the given connection.
+func newFleetView(c collector) *fleetView {
 	return &fleetView{
-		hosts: []Host{{
-			Server: config.Server{Alias: "a", Host: "10.0.0.1"},
-			Dial:   func() (*sshx.Client, error) { return nil, errors.New("nope") },
-		}},
+		hosts:    []Host{{Server: config.Server{Alias: "a", Host: "10.0.0.1"}}},
+		conns:    []collector{c},
 		states:   make([]hostState, 1),
 		interval: time.Second,
 		results:  make(chan hostUpdate, 1),
 	}
 }
 
-func startFleetLoop(v *fleetView, scr screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan *Host) {
+func startFleetLoop(v *fleetView, scr screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan *Selection) {
 	ev := make(chan tui.Event)
 	tick := make(chan time.Time)
 	ticker := time.NewTicker(time.Hour) // never fires in tests; tick drives ticks
-	done := make(chan *Host, 1)
+	done := make(chan *Selection, 1)
 	go func() { done <- v.loop(scr, ev, tick, ticker) }()
 	return ev, tick, ticker, done
 }
@@ -330,14 +368,14 @@ func TestFleetLoopQuit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := newFleetView()
+			v := newFleetView(&fakeConn{state: sshx.StateConnecting})
 			scr := &fakeScreen{w: 100, h: 30}
 			ev, _, ticker, done := startFleetLoop(v, scr)
 			defer ticker.Stop()
 
 			ev <- tt.ev
-			if host := <-done; host != nil {
-				t.Errorf("loop returned %v, want nil (quit, not drill)", host)
+			if sel := <-done; sel != nil {
+				t.Errorf("loop returned %v, want nil (quit, not drill)", sel)
 			}
 			if scr.draws() == 0 {
 				t.Error("loop should draw at least once before quitting")
@@ -347,40 +385,41 @@ func TestFleetLoopQuit(t *testing.T) {
 }
 
 func TestFleetLoopEnterDrillsIn(t *testing.T) {
-	v := newFleetView()
-	v.results = make(chan hostUpdate) // unbuffered: deterministic hand-off
+	// A ready connection is enterable, so Enter drills into it.
+	v := newFleetView(&fakeConn{state: sshx.StateReady})
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
-	// Host 0 reports ready, so Enter drills into it.
-	v.results <- hostUpdate{index: 0, state: hostState{ok: true}}
 	ev <- tui.Event{Key: tui.KeyEnter}
-	host := <-done
-	if host == nil {
-		t.Fatal("Enter on a ready host should return it to drill into")
+	sel := <-done
+	if sel == nil {
+		t.Fatal("Enter on a ready host should return a selection to drill into")
 	}
-	if host.Server.Alias != "a" {
-		t.Errorf("drilled host alias = %q, want a", host.Server.Alias)
+	if sel.Host.Server.Alias != "a" {
+		t.Errorf("drilled host alias = %q, want a", sel.Host.Server.Alias)
+	}
+	if sel.Client == nil {
+		t.Error("selection should carry the live connection for reuse")
 	}
 }
 
 func TestFleetLoopEnterNotReady(t *testing.T) {
-	v := newFleetView()
+	v := newFleetView(&fakeConn{state: sshx.StateConnecting})
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
-	// No result yet: the host is still connecting. Enter must not drill.
+	// Still connecting: Enter must not drill.
 	ev <- tui.Event{Key: tui.KeyEnter}
 	ev <- tui.Event{Rune: 'q'}
-	if host := <-done; host != nil {
-		t.Errorf("Enter on a not-ready host should not drill, got %v", host)
+	if sel := <-done; sel != nil {
+		t.Errorf("Enter on a not-ready host should not drill, got %v", sel)
 	}
 }
 
 func TestFleetLoopResultRedraws(t *testing.T) {
-	v := newFleetView()
+	v := newFleetView(&fakeConn{state: sshx.StateReady})
 	v.results = make(chan hostUpdate) // unbuffered: deterministic hand-off
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
@@ -398,7 +437,7 @@ func TestFleetLoopResultRedraws(t *testing.T) {
 }
 
 func TestFleetLoopIntervalChange(t *testing.T) {
-	v := newFleetView()
+	v := newFleetView(&fakeConn{state: sshx.StateConnecting})
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
@@ -414,13 +453,14 @@ func TestFleetLoopIntervalChange(t *testing.T) {
 }
 
 func TestEnterHost(t *testing.T) {
+	c := &fakeConn{state: sshx.StateConnecting}
 	v := &fleetView{
-		hosts:  []Host{{Server: config.Server{Alias: "a"}}},
-		states: make([]hostState, 1),
+		hosts: []Host{{Server: config.Server{Alias: "a"}}},
+		conns: []collector{c},
 	}
 
-	// Still connecting (zero state): no drill, "connecting" status.
-	if h := v.enterHost(); h != nil {
+	// Still connecting: no drill, "connecting" status.
+	if sel := v.enterHost(); sel != nil {
 		t.Error("connecting host should not drill in")
 	}
 	if !strings.Contains(v.status, "connecting") {
@@ -428,32 +468,32 @@ func TestEnterHost(t *testing.T) {
 	}
 
 	// Offline (error): no drill, "offline" status.
-	v.states[0] = hostState{err: errors.New("dial refused")}
-	if h := v.enterHost(); h != nil {
+	c.state, c.err = sshx.StateBroken, errors.New("dial refused")
+	if sel := v.enterHost(); sel != nil {
 		t.Error("offline host should not drill in")
 	}
 	if !strings.Contains(v.status, "offline") {
 		t.Errorf("status = %q, want an offline message", v.status)
 	}
 
-	// Ready: drills in.
-	v.states[0] = hostState{ok: true}
-	if h := v.enterHost(); h == nil || h.Server.Alias != "a" {
-		t.Errorf("ready host should drill in, got %v", h)
+	// Ready: drills in and carries the live connection.
+	c.state = sshx.StateReady
+	sel := v.enterHost()
+	if sel == nil || sel.Host.Server.Alias != "a" {
+		t.Errorf("ready host should drill in, got %v", sel)
 	}
 
 	// Empty view: selection is out of range, so nothing happens.
-	if h := (&fleetView{}).enterHost(); h != nil {
-		t.Errorf("empty view should not drill in, got %v", h)
+	if sel := (&fleetView{}).enterHost(); sel != nil {
+		t.Errorf("empty view should not drill in, got %v", sel)
 	}
 }
 
 func TestTrigger(t *testing.T) {
+	mk := func() collector { return &fakeConn{state: sshx.StateBroken, err: errors.New("no")} }
 	v := &fleetView{
-		hosts: []Host{
-			{Server: config.Server{Alias: "a"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
-			{Server: config.Server{Alias: "b"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
-		},
+		hosts:   []Host{{Server: config.Server{Alias: "a"}}, {Server: config.Server{Alias: "b"}}},
+		conns:   []collector{mk(), mk()},
 		states:  make([]hostState, 2),
 		results: make(chan hostUpdate, 2),
 	}
@@ -488,22 +528,33 @@ func TestTrigger(t *testing.T) {
 	}
 }
 
-func TestFleetLoopTickTriggersCollect(t *testing.T) {
-	dialed := make(chan struct{}, 1)
-	v := newFleetView()
-	v.hosts[0].Dial = func() (*sshx.Client, error) {
-		select {
-		case dialed <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("nope")
+func TestNewSessionWiresConns(t *testing.T) {
+	hosts := []Host{
+		{Server: config.Server{Alias: "a"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
+		{Server: config.Server{Alias: "b"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
 	}
+	s := NewSession(hosts)
+	defer s.Close()
+
+	if len(s.conns) != len(hosts) {
+		t.Fatalf("session conns = %d, want %d (one per host)", len(s.conns), len(hosts))
+	}
+	for i, c := range s.conns {
+		if c == nil {
+			t.Errorf("conn %d is nil, want a managed connection", i)
+		}
+	}
+}
+
+func TestFleetLoopTickTriggersCollect(t *testing.T) {
+	ran := make(chan struct{}, 1)
+	v := newFleetView(&fakeConn{state: sshx.StateReady, ran: ran})
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, tick, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
 	tick <- time.Now()
-	<-dialed // a tick must have started a collection (Dial was called)
+	<-ran // a tick must have started a collection (Run was called)
 	ev <- tui.Event{Rune: 'q'}
 	<-done
 }

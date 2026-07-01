@@ -73,7 +73,8 @@ func Dial(opts DialOptions) (*Client, error) {
 }
 
 // keepalive periodically pings the server so idle connections aren't dropped by
-// the server's ClientAliveInterval. Exits when the client is closed.
+// the server's ClientAliveInterval. Exits when the client is closed or a ping
+// fails (the connection is then dead; a Managed wrapper detects this and redials).
 func (c *Client) keepalive(interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -82,10 +83,27 @@ func (c *Client) keepalive(interval time.Duration) {
 		case <-c.done:
 			return
 		case <-t.C:
-			if _, _, err := c.c.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			if c.Ping() != nil {
 				return
 			}
 		}
+	}
+}
+
+// Ping sends an OpenSSH keepalive global request and reports whether the peer
+// answered. It is deadline-guarded: a black-hole peer that never replies can't
+// wedge the caller (golang/go#21478), so it is safe to call from a health probe.
+func (c *Client) Ping() error {
+	ch := make(chan error, 1) // buffered so the goroutine never leaks on timeout
+	go func() {
+		_, _, err := c.c.SendRequest("keepalive@openssh.com", true, nil)
+		ch <- err
+	}()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(5 * time.Second):
+		return errors.New("keepalive ping timed out")
 	}
 }
 

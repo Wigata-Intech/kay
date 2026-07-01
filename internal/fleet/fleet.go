@@ -51,16 +51,36 @@ type hostUpdate struct {
 	state hostState
 }
 
+// collector is the per-host capability the fleet needs: run a command (to
+// collect metrics) and report connection state. *sshx.Managed satisfies it, so
+// the fleet reuses one persistent connection per host instead of dialing every
+// tick. It is an interface so the loop can be driven in tests with fakes.
+type collector interface {
+	metrics.Runner
+	State() sshx.ConnState
+	Err() error
+}
+
 // fleetView holds the mutable state of a running fleet overview.
 type fleetView struct {
 	hosts    []Host
 	states   []hostState
+	conns    []collector // one persistent, self-healing connection per host
 	list     tui.List
 	interval time.Duration
 	anon     bool
 	status   string // transient message (e.g. "still connecting"), cleared on next key
 	results  chan hostUpdate
 	inflight int // hosts still collecting in the current round
+}
+
+// Selection is the host a user chose to drill into, together with its live
+// persistent connection so the dashboard can reuse it — running its metrics over
+// the same transport — instead of opening a second one. The connection keeps
+// self-healing in the background, so the dashboard needs no separate redial.
+type Selection struct {
+	Host   Host
+	Client metrics.Runner
 }
 
 // Run shows the fleet overview standalone: it owns the terminal and input for the
@@ -75,8 +95,11 @@ func Run(hosts []Host, opts Options) error {
 	}
 	tui.SetColorMode(opts.Color)
 
+	sess := NewSession(hosts)
+	defer sess.Close()
+
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return runPlain(hosts, opts.Interval, opts.Anonymize)
+		return runPlain(hosts, sess.conns, opts.Interval, opts.Anonymize)
 	}
 
 	scr, err := tui.NewScreen()
@@ -98,31 +121,60 @@ func Run(hosts []Host, opts Options) error {
 	}()
 
 	for {
-		host, err := RunView(scr, events, hosts, opts)
+		sel, err := sess.RunView(scr, events, opts)
 		if err != nil {
 			return err
 		}
-		if host == nil {
+		if sel == nil {
 			return nil // user quit
 		}
 		// Standalone has no dashboard to drill into; return to the overview.
 	}
 }
 
+// dialCap bounds concurrent SSH dials across the whole fleet so a cold start of
+// many hosts can't trip a server's MaxStartups throttle or exhaust local sockets.
+const dialCap = 16
+
+// Session owns one persistent, self-healing SSH connection per host and keeps
+// them alive across repeated RunView calls, so drilling into a host's dashboard
+// and back never re-handshakes. The caller (cmd/kay) creates one Session for the
+// whole interactive session and Closes it at the end.
+type Session struct {
+	hosts []Host
+	conns []collector
+	pool  *sshx.Pool
+}
+
+// NewSession registers every host with a fresh connection pool and starts
+// connecting to all of them in the background (dial concurrency is capped).
+func NewSession(hosts []Host) *Session {
+	pool := sshx.NewPool(dialCap)
+	conns := make([]collector, len(hosts))
+	for i := range hosts {
+		conns[i] = pool.Add(hosts[i].Dial)
+	}
+	return &Session{hosts: hosts, conns: conns, pool: pool}
+}
+
+// Close tears down every connection in the pool.
+func (s *Session) Close() { s.pool.Close() }
+
 // RunView runs the fleet overview against an already-open screen and a shared
-// input channel, returning the host the user selected with Enter (to drill into),
-// or nil when they quit. The drill-in coordinator (cmd/kay) uses this to hand the
-// terminal to a host's dashboard and back without re-entering the alt screen.
-func RunView(scr *tui.Screen, events <-chan tui.Event, hosts []Host, opts Options) (*Host, error) {
+// input channel, reusing the session's persistent connections. It returns the
+// host the user selected with Enter (with its live connection to reuse), or nil
+// when they quit.
+func (s *Session) RunView(scr *tui.Screen, events <-chan tui.Event, opts Options) (*Selection, error) {
 	if opts.Interval <= 0 {
 		opts.Interval = 5 * time.Second
 	}
 	v := &fleetView{
-		hosts:    hosts,
-		states:   make([]hostState, len(hosts)),
+		hosts:    s.hosts,
+		states:   make([]hostState, len(s.hosts)),
+		conns:    s.conns,
 		interval: opts.Interval,
 		anon:     opts.Anonymize,
-		results:  make(chan hostUpdate, len(hosts)), // buffered so no host goroutine blocks
+		results:  make(chan hostUpdate, len(s.hosts)), // buffered so no host goroutine blocks
 	}
 
 	ticker := time.NewTicker(v.interval)
@@ -133,24 +185,25 @@ func RunView(scr *tui.Screen, events <-chan tui.Event, hosts []Host, opts Option
 }
 
 // trigger starts a fresh round: one goroutine per host, each streaming its own
-// result back as soon as it finishes. A slow or unreachable host therefore never
-// blocks the others. Skips if a round is still in flight.
+// result back as soon as it finishes. Collection reuses the persistent
+// connection, so a healthy host pays no handshake; an unreachable one returns its
+// connection state without blocking the others. Skips if a round is in flight.
 func (v *fleetView) trigger() {
 	if v.inflight > 0 {
 		return
 	}
-	v.inflight = len(v.hosts)
-	for i := range v.hosts {
-		i, h := i, v.hosts[i]
-		go func() { v.results <- hostUpdate{index: i, state: collectOne(h)} }()
+	v.inflight = len(v.conns)
+	for i := range v.conns {
+		i, c := i, v.conns[i]
+		go func() { v.results <- hostUpdate{index: i, state: collect(c)} }()
 	}
 }
 
 // loop is the fleet's terminal-independent event loop: it redraws on every event
-// and returns when the user quits (nil) or drills into a host (the host). Per-host
-// results stream in independently. The screen, input, and tick sources are
-// injected so it can run headless in tests.
-func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Host {
+// and returns when the user quits (nil) or drills into a host (the selection).
+// Per-host results stream in independently. The screen, input, and tick sources
+// are injected so it can run headless in tests.
+func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Selection {
 	draw := func() {
 		w, h := scr.Size()
 		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, v.status, w, h, v.anon))
@@ -162,8 +215,8 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 		case ev := <-events:
 			v.status = "" // clear any transient message on the next keypress
 			if ev.Key == tui.KeyEnter {
-				if h := v.enterHost(); h != nil {
-					return h // drill into a ready host's dashboard
+				if sel := v.enterHost(); sel != nil {
+					return sel // drill into a ready host's dashboard
 				}
 			} else if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
 				return nil // quit
@@ -179,20 +232,21 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 	}
 }
 
-// enterHost returns the highlighted host when it is ready to drill into; when it
-// is still connecting or offline it sets a transient status instead and returns
-// nil, so Enter on a not-ready host explains itself rather than doing nothing.
-func (v *fleetView) enterHost() *Host {
+// enterHost returns the highlighted host with its live connection when it is
+// ready to drill into; when it is still connecting or offline it sets a transient
+// status instead and returns nil, so Enter on a not-ready host explains itself
+// rather than doing nothing. Readiness is taken from the connection itself (not
+// the last metrics round) so a just-connected host is immediately enterable.
+func (v *fleetView) enterHost() *Selection {
 	i := v.list.Selected
-	if i < 0 || i >= len(v.hosts) {
+	if i < 0 || i >= len(v.conns) {
 		return nil
 	}
-	st := v.states[i]
-	if st.ok {
-		h := v.hosts[i]
-		return &h
+	c := v.conns[i]
+	if c.State() == sshx.StateReady {
+		return &Selection{Host: v.hosts[i], Client: c}
 	}
-	if st.err != nil {
+	if c.Err() != nil {
 		v.status = tui.Yellow("host is offline — can't open its dashboard")
 	} else {
 		v.status = tui.Yellow("host is still connecting — try again in a moment")
@@ -228,31 +282,35 @@ func handleFleetKey(ev tui.Event, list *tui.List, interval *time.Duration, ticke
 	return false
 }
 
-// collectOne dials a single host, collects its metrics, and closes the
-// connection. It never blocks the caller beyond the SSH round trip.
-func collectOne(h Host) hostState {
-	c, err := h.Dial()
-	if err != nil {
-		return hostState{err: err}
+// collect reads one host's current state from its persistent connection:
+// freshly collected metrics when the connection is ready, otherwise the
+// connection's own state (offline with the last error, or still connecting). It
+// reuses the transport, so a healthy host pays no handshake.
+func collect(c collector) hostState {
+	switch c.State() {
+	case sshx.StateReady:
+		s, err := metrics.Collect(c)
+		if err != nil {
+			return hostState{err: err}
+		}
+		return hostState{snap: s, ok: true}
+	case sshx.StateBroken:
+		return hostState{err: c.Err()}
+	default:
+		return hostState{} // connecting: no data, no error yet
 	}
-	defer c.Close()
-	s, cerr := metrics.Collect(c)
-	if cerr != nil {
-		return hostState{err: cerr}
-	}
-	return hostState{snap: s, ok: true}
 }
 
 // collectAll collects every host concurrently and returns once all finish. Used
 // by the non-interactive plain renderer, which prints a full table each cycle.
-func collectAll(hosts []Host) []hostState {
-	states := make([]hostState, len(hosts))
+func collectAll(conns []collector) []hostState {
+	states := make([]hostState, len(conns))
 	var wg sync.WaitGroup
-	for i := range hosts {
+	for i := range conns {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			states[i] = collectOne(hosts[i])
+			states[i] = collect(conns[i])
 		}(i)
 	}
 	wg.Wait()
@@ -328,10 +386,10 @@ func statCell(label string, pct float64) string {
 	return tui.ThreshColor(fmt.Sprintf("%s %3.0f%%", label, pct), pct)
 }
 
-func runPlain(hosts []Host, interval time.Duration, anon bool) error {
+func runPlain(hosts []Host, conns []collector, interval time.Duration, anon bool) error {
 	tui.ColorEnabled = false
 	for {
-		states := collectAll(hosts)
+		states := collectAll(conns)
 		fmt.Printf("=== fleet · %s ===\n", time.Now().Format("15:04:05"))
 		for i, hst := range hosts {
 			alias, host := hst.Server.Alias, hst.Server.Host

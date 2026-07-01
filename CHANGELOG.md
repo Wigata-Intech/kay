@@ -43,6 +43,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Persistent fleet connections** — `kay fleet` now keeps one long-lived,
+  self-healing SSH connection per host and reuses it for every refresh, instead
+  of dialing a brand-new connection each tick. Reusing the transport skips the
+  KEX + public-key-auth handshake on all but the first connect, which cuts CPU,
+  network round-trips, and — most visibly on the server — the connection churn
+  that spams `auth.log` and pressures sshd's `MaxStartups`. A shared dial cap
+  bounds concurrent connects so a large fleet's cold start can't self-throttle,
+  and reconnects use exponential backoff with jitter. Drilling into a host now
+  **reuses** the connection the fleet already established (no second handshake),
+  and the drilled-in dashboard inherits the connection's self-healing. New
+  `internal/sshx` types `Pool` and `Managed` implement this, stdlib-only.
+
 - **Responsive startup** — the dashboard's first metric collection now runs
   asynchronously behind a "connecting…" screen instead of blocking, and both the
   dashboard and `kay fleet` ignore input (except quit) until the first data

@@ -18,7 +18,7 @@ internal/
 ├── fleet          multi-host fleet overview (kay fleet)         [app]
 ├── keys           key generation + PEM I/O                      [app]
 ├── metrics        remote metric collection + parsing            [library]
-├── sshx           the single SSH client path (dial/run/shell)   [library]
+├── sshx           SSH client path + self-healing connection pool [library]
 └── tui            minimal terminal UI toolkit                   [library]
 ```
 
