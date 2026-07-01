@@ -24,7 +24,7 @@ func TestListSelectionAndScroll(t *testing.T) {
 	l.SetRows(rows)
 
 	// height 5 => header + 3 rows + "more" marker (since 10 > 4 rows)
-	out := l.Render(20, 5, true)
+	out := l.Render(20, 5)
 	if len(out) != 5 {
 		t.Fatalf("render lines = %d, want 5", len(out))
 	}
@@ -37,7 +37,7 @@ func TestListSelectionAndScroll(t *testing.T) {
 
 	// Move to the bottom; the window should scroll to include the last row.
 	l.Bottom()
-	out = l.Render(20, 5, true)
+	out = l.Render(20, 5)
 	joined := strings.Join(out, "\n")
 	if !strings.Contains(joined, "row9") {
 		t.Errorf("bottom not visible after Bottom(): %q", joined)
@@ -52,7 +52,7 @@ func TestListEmpty(t *testing.T) {
 	tui.ColorEnabled = false
 	defer func() { tui.ColorEnabled = old }()
 
-	out := (&tui.List{}).Render(20, 4, true)
+	out := (&tui.List{}).Render(20, 4)
 	if len(out) != 1 || !strings.Contains(out[0], "none") {
 		t.Errorf("empty list render = %v, want a single \"(none)\" line", out)
 	}

@@ -213,27 +213,26 @@ func TestPadEdgeCases(t *testing.T) {
 
 // TestListPager exercises the non-selectable pager path together with the scroll
 // helpers. Steps share state, so this reads as an ordered sequence.
-func TestListPager(t *testing.T) {
+func TestPager(t *testing.T) {
 	old := tui.ColorEnabled
 	tui.ColorEnabled = false
 	defer func() { tui.ColorEnabled = old }()
 
-	l := &tui.List{}
 	rows := make([]string, 10)
 	for i := range rows {
 		rows[i] = "row" + strconv.Itoa(i)
 	}
-	l.SetRows(rows)
+	p := &tui.Pager{Rows: rows}
 
-	if l.Len() != 10 {
-		t.Fatalf("Len = %d, want 10", l.Len())
+	if p.Len() != 10 {
+		t.Fatalf("Len = %d, want 10", p.Len())
 	}
-	if l.Offset() != 0 {
-		t.Fatalf("initial Offset = %d, want 0", l.Offset())
+	if p.Offset() != 0 {
+		t.Fatalf("initial Offset = %d, want 0", p.Offset())
 	}
 
-	// Pager render from the top: first `height` rows, no header.
-	out := l.Render(20, 4, false)
+	// Render from the top: first `height` rows.
+	out := p.Render(20, 4)
 	if len(out) != 4 {
 		t.Fatalf("pager render lines = %d, want 4", len(out))
 	}
@@ -242,37 +241,37 @@ func TestListPager(t *testing.T) {
 	}
 
 	// ScrollBy moves the window; ScrollBy below zero is clamped to zero.
-	l.ScrollBy(2)
-	if l.Offset() != 2 {
-		t.Errorf("Offset after ScrollBy(2) = %d, want 2", l.Offset())
+	p.ScrollBy(2)
+	if p.Offset() != 2 {
+		t.Errorf("Offset after ScrollBy(2) = %d, want 2", p.Offset())
 	}
-	l.ScrollBy(-100)
-	if l.Offset() != 0 {
-		t.Errorf("Offset after ScrollBy(-100) = %d, want 0 (clamped)", l.Offset())
+	p.ScrollBy(-100)
+	if p.Offset() != 0 {
+		t.Errorf("Offset after ScrollBy(-100) = %d, want 0 (clamped)", p.Offset())
 	}
 
-	// ScrollBottom overshoots deliberately; PagerWindow clamps to the last page.
-	l.ScrollBottom()
-	start, end := l.PagerWindow(4)
+	// ScrollBottom overshoots deliberately; Window clamps to the last page.
+	p.ScrollBottom()
+	start, end := p.Window(4)
 	if start != 6 || end != 10 {
-		t.Errorf("PagerWindow(4) after ScrollBottom = (%d,%d), want (6,10)", start, end)
+		t.Errorf("Window(4) after ScrollBottom = (%d,%d), want (6,10)", start, end)
 	}
 
 	// ScrollTo an in-range offset, then confirm the render window matches.
-	l.ScrollTo(3)
-	start, end = l.PagerWindow(4)
+	p.ScrollTo(3)
+	start, end = p.Window(4)
 	if start != 3 || end != 7 {
-		t.Errorf("PagerWindow(4) after ScrollTo(3) = (%d,%d), want (3,7)", start, end)
+		t.Errorf("Window(4) after ScrollTo(3) = (%d,%d), want (3,7)", start, end)
 	}
-	out = l.Render(20, 4, false)
+	out = p.Render(20, 4)
 	if !strings.HasPrefix(strings.TrimSpace(out[0]), "row3") {
 		t.Errorf("first line after ScrollTo(3) = %q, want row3", out[0])
 	}
 
 	// ScrollTop resets to the first row.
-	l.ScrollTop()
-	if l.Offset() != 0 {
-		t.Errorf("Offset after ScrollTop = %d, want 0", l.Offset())
+	p.ScrollTop()
+	if p.Offset() != 0 {
+		t.Errorf("Offset after ScrollTop = %d, want 0", p.Offset())
 	}
 }
 
@@ -287,15 +286,15 @@ func TestListRenderHeightGuards(t *testing.T) {
 	t.Run("zero-height", func(t *testing.T) {
 		l := &tui.List{}
 		l.SetRows([]string{"a", "b"})
-		if out := l.Render(20, 0, true); len(out) != 0 {
-			t.Errorf("Render(_,0,_) = %v, want empty", out)
+		if out := l.Render(20, 0); len(out) != 0 {
+			t.Errorf("Render(_,0) = %v, want empty", out)
 		}
 	})
 
 	t.Run("header-consumes-height", func(t *testing.T) {
 		l := &tui.List{Header: "H"}
 		l.SetRows([]string{"a", "b"})
-		out := l.Render(20, 1, true)
+		out := l.Render(20, 1)
 		if len(out) != 1 || !strings.Contains(out[0], "H") {
 			t.Errorf("Render with height 1 and a header = %v, want just the header", out)
 		}
@@ -330,14 +329,13 @@ func TestListMoveAndEnds(t *testing.T) {
 	}
 }
 
-// TestPagerWindowShortList covers the branch where the list is shorter than the
-// viewport, so the whole list fits and the offset is pinned to zero.
+// TestPagerWindowShortList covers the branch where the rows are shorter than the
+// viewport, so the whole set fits and the offset is pinned to zero.
 func TestPagerWindowShortList(t *testing.T) {
-	l := &tui.List{}
-	l.SetRows([]string{"only", "two"})
-	l.ScrollTo(5) // deliberately out of range
-	start, end := l.PagerWindow(10)
+	p := &tui.Pager{Rows: []string{"only", "two"}}
+	p.ScrollTo(5) // deliberately out of range
+	start, end := p.Window(10)
 	if start != 0 || end != 2 {
-		t.Errorf("PagerWindow(10) on short list = (%d,%d), want (0,2)", start, end)
+		t.Errorf("Window(10) on short list = (%d,%d), want (0,2)", start, end)
 	}
 }

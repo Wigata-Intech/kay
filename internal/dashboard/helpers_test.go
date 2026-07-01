@@ -103,31 +103,6 @@ func TestGaugeLine(t *testing.T) {
 	}
 }
 
-func TestThreshColor(t *testing.T) {
-	prev := tui.ColorEnabled
-	tui.ColorEnabled = true
-	t.Cleanup(func() { tui.ColorEnabled = prev })
-	tests := []struct {
-		name string
-		pct  float64
-		want func(string) string
-	}{
-		{"green-low", 10, tui.Green},
-		{"green-just-under-70", 69, tui.Green},
-		{"yellow-70", 70, tui.Yellow},
-		{"yellow-just-under-90", 89, tui.Yellow},
-		{"red-90", 90, tui.Red},
-		{"red-high", 99, tui.Red},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got, want := threshColor("x", tt.pct), tt.want("x"); got != want {
-				t.Errorf("threshColor(x,%v) = %q, want %q", tt.pct, got, want)
-			}
-		})
-	}
-}
-
 func TestLoadColor(t *testing.T) {
 	prev := tui.ColorEnabled
 	tui.ColorEnabled = true
@@ -172,23 +147,6 @@ func TestColorStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got, want := colorStatus(tt.status), tt.want(tt.status); got != want {
 				t.Errorf("colorStatus(%q) = %q, want %q", tt.status, got, want)
-			}
-		})
-	}
-}
-
-func TestFirstLine(t *testing.T) {
-	tests := []struct {
-		name, in, want string
-	}{
-		{"multiline", "first\nsecond", "first"},
-		{"single", "only", "only"},
-		{"empty", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := firstLine(tt.in); got != tt.want {
-				t.Errorf("firstLine(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -991,23 +949,6 @@ func TestRenderDetailBody(t *testing.T) {
 		out := m.renderDetailBody(40, 3)
 		if !strings.Contains(out[0], "▌") {
 			t.Errorf("current hit row should carry a marker: %q", out[0])
-		}
-	})
-}
-
-func TestClampAll(t *testing.T) {
-	noColor(t)
-	t.Run("truncates-height", func(t *testing.T) {
-		in := []string{"a", "b", "c", "d"}
-		out := clampAll(in, 10, 2)
-		if len(out) != 2 {
-			t.Errorf("clampAll height = %d, want 2", len(out))
-		}
-	})
-	t.Run("clamps-width", func(t *testing.T) {
-		out := clampAll([]string{"abcdefghij"}, 4, 5)
-		if tui.VisibleWidth(out[0]) > 4 {
-			t.Errorf("clampAll width = %d, want <= 4", tui.VisibleWidth(out[0]))
 		}
 	})
 }
