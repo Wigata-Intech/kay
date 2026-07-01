@@ -96,6 +96,25 @@ func TestFleetLoopResultRedraws(t *testing.T) {
 	}
 }
 
+func TestFleetLoopIgnoresKeysUntilLoaded(t *testing.T) {
+	v := newFleetView()
+	v.results = make(chan []hostState) // unbuffered: deterministic hand-off
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, ticker, done := startFleetLoop(v, scr)
+	defer ticker.Stop()
+
+	start := v.interval
+	ev <- tui.Event{Rune: '+'}           // ignored: not loaded yet
+	v.results <- []hostState{{ok: true}} // first result => loaded
+	ev <- tui.Event{Rune: '+'}           // now applied: interval grows
+	ev <- tui.Event{Rune: 'q'}
+	<-done
+
+	if v.interval != start+time.Second {
+		t.Errorf("interval = %v, want %v (only the post-load + counts)", v.interval, start+time.Second)
+	}
+}
+
 func TestFleetLoopTickTriggersCollect(t *testing.T) {
 	dialed := make(chan struct{}, 1)
 	v := newFleetView()

@@ -77,6 +77,8 @@ type model struct {
 	confirm     *confirmPrompt
 	detail      *tui.Pager
 	detailTitle string
+	diskExpl    *diskExplorer // non-nil while drilling into a mount with du
+	notice      string        // non-empty shows a dismissable modal message
 
 	// detail-pager search + horizontal scroll state
 	searching   bool
@@ -89,8 +91,10 @@ type model struct {
 	// so the flags need no synchronisation.
 	results      chan collectResult
 	reconnected  chan reconnectResult
+	duResults    chan duResult
 	collecting   bool
 	reconnecting bool
+	loading      bool // true until the first collection returns (blocks input)
 }
 
 type keyResult struct {
@@ -107,6 +111,13 @@ type collectResult struct {
 type reconnectResult struct {
 	client Client
 	err    error
+}
+
+// duResult carries the output of an async disk-explorer scan back to the loop.
+type duResult struct {
+	path string
+	out  string
+	err  error
 }
 
 // screen is the subset of *tui.Screen the event loop needs. It is an interface
@@ -143,7 +154,12 @@ func Run(client Client, srv config.Server, opts Options) error {
 	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
 	m.results = make(chan collectResult, 1)
 	m.reconnected = make(chan reconnectResult, 1)
-	m.refresh()
+	m.duResults = make(chan duResult, 1)
+	// The first collect runs asynchronously so a slow SSH round trip doesn't block
+	// startup: the loop draws a loading screen immediately and input is ignored
+	// (except quit) until data arrives, so keys typed during startup can't queue up.
+	m.loading = true
+	m.trigger()
 
 	events := make(chan tui.Event, 16)
 	go readEvents(tui.NewReader(os.Stdin), events)
@@ -183,6 +199,9 @@ func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal
 		case rr := <-m.reconnected:
 			m.reconnecting = false
 			m.applyReconnect(rr)
+			draw()
+		case dr := <-m.duResults:
+			m.applyDu(dr)
 			draw()
 		case sig := <-sigCh:
 			if signalIsQuit(sig) {
@@ -236,6 +255,11 @@ func (m *model) applyKeyEvent(ev tui.Event, resetTick func()) bool {
 	if ev.Type == tui.EventQuit {
 		return true
 	}
+	// Until the first collection lands, swallow input (except quit) so keys typed
+	// during the initial connect don't queue up and fire when data appears.
+	if m.loading {
+		return ev.Rune == 'q'
+	}
 	r := m.handleKey(ev)
 	if r.quit {
 		return true
@@ -251,6 +275,7 @@ func (m *model) applyKeyEvent(ev tui.Event, resetTick func()) bool {
 
 // applyCollect installs a collection result or starts a reconnect on failure.
 func (m *model) applyCollect(res collectResult) {
+	m.loading = false // the first result (success or failure) has arrived
 	if res.err != nil {
 		m.err = res.err
 		m.attemptReconnect()
@@ -271,15 +296,6 @@ func (m *model) applyReconnect(rr reconnectResult) {
 }
 
 // ---- data refresh ----
-
-func (m *model) refresh() {
-	s, err := metrics.Collect(m.client)
-	if err != nil {
-		m.err = err
-		return
-	}
-	m.applySnap(s)
-}
 
 // applySnap installs a freshly collected snapshot (called only from the event
 // loop, so the model is never touched concurrently with the collect goroutine).

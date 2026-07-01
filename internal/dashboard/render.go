@@ -56,11 +56,34 @@ func (m *model) render(w, h int) []string {
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
 
+	if m.loading && !m.have {
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box("", []string{"", "  connecting…", ""}, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine("q quit", cw)))
+		return tui.ClampAll(out, w, h)
+	}
+
+	if m.notice != "" {
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box("Notice", []string{"", "  " + m.notice, ""}, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine("press any key to dismiss", cw)))
+		return tui.ClampAll(out, w, h)
+	}
+
 	if m.detail != nil {
 		body := m.renderDetailBody(innerW, innerH)
 		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
 		out = append(out, tui.Box(m.detailTitle, body, cw, innerH)...)
 		out = append(out, m.detailFooter(cw))
+		return tui.ClampAll(out, w, h)
+	}
+
+	if m.diskExpl != nil {
+		title, body := m.renderDiskExplorer(innerW, innerH)
+		out := []string{m.headerBar(cw), tui.TabBar(tabNames, m.tab, cw)}
+		out = append(out, tui.Box(title, body, cw, innerH)...)
+		out = append(out, tui.Dim(tui.ClampLine(
+			"j/k select · l/enter open · h/backspace up · . hidden · esc back", cw)))
 		return tui.ClampAll(out, w, h)
 	}
 
@@ -238,7 +261,7 @@ func (m *model) blockedReadOnly() bool {
 }
 
 func (m *model) keyHints() string {
-	base := "Tab/[ ] tabs · r refresh · +/- interval · q quit"
+	base := "Tab/H/L tabs · r refresh · +/- interval · q quit"
 	if m.readOnly {
 		base = tui.Yellow("[read-only]") + " " + base
 	}
@@ -253,7 +276,9 @@ func (m *model) keyHints() string {
 			return "j/k select · l logs · Enter inspect · " + base
 		}
 		return "j/k select · l logs · R restart · x stop · Enter inspect · " + base
-	case tabNetwork, tabDisk:
+	case tabDisk:
+		return "j/k select · Enter/l explore (du) · " + base
+	case tabNetwork:
 		return "j/k select · " + base
 	}
 	return base

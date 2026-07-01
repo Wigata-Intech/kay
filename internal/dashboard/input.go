@@ -11,8 +11,18 @@ import (
 func (m *model) handleKey(ev tui.Event) keyResult {
 	m.status = ""
 
+	if m.notice != "" {
+		m.notice = "" // any key dismisses the modal
+		return keyResult{}
+	}
+
 	if m.detail != nil {
 		return m.handleDetailKey(ev)
+	}
+
+	if m.diskExpl != nil {
+		m.handleDiskExplorerKey(ev)
+		return keyResult{}
 	}
 
 	if m.confirm != nil {
@@ -36,8 +46,21 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		m.procAction(ev)
 	case tabDocker:
 		m.dockAction(ev)
+	case tabDisk:
+		m.diskAction(ev)
 	}
 	return keyResult{}
+}
+
+// diskAction opens the du drill-down when Enter is pressed on a mount.
+func (m *model) diskAction(ev tui.Event) {
+	if ev.Key != tui.KeyEnter {
+		return
+	}
+	if m.disk.Selected < 0 || m.disk.Selected >= len(m.snap.Disks) {
+		return
+	}
+	m.openDiskExplorer(m.snap.Disks[m.disk.Selected].Mount)
 }
 
 // handleGlobalKey processes keys valid on every tab (quit, tab switching,
@@ -48,9 +71,9 @@ func (m *model) handleGlobalKey(ev tui.Event) (r keyResult, handled bool) {
 		return keyResult{quit: true}, true
 	case ev.Key == tui.KeyTab:
 		m.tab = (m.tab + 1) % len(tabNames)
-	case ev.Key == tui.KeyShiftTab, ev.Rune == '[':
+	case ev.Key == tui.KeyShiftTab, ev.Rune == '[', ev.Rune == 'H':
 		m.tab = (m.tab + len(tabNames) - 1) % len(tabNames)
-	case ev.Rune == ']':
+	case ev.Rune == ']', ev.Rune == 'L':
 		m.tab = (m.tab + 1) % len(tabNames)
 	case ev.Rune >= '1' && ev.Rune <= '5':
 		m.tab = int(ev.Rune - '1')

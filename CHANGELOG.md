@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Disk explorer** — press Enter (or `l`) on a mount in the dashboard's Disk tab
+  to drill into it: directories (recursive `du` size) **and files** (size via
+  `find`) are listed largest-first, showing the name and extension. `Enter`/`l`/→
+  descends into a directory, `h`/←/Backspace goes up (never above the mount), and
+  Esc exits. Dotfiles are hidden by default; `.` toggles them and shown hidden
+  entries are dimmed and tagged. Opening a file raises a dismissable
+  "not supported" notice. Scans run on-demand over SSH, one level at a time, and
+  **asynchronously** with a loading state so the dashboard stays responsive on
+  large trees; keys are ignored mid-scan (except Esc to cancel). Paths are
+  single-quoted so names with spaces or shell metacharacters are inert.
+- **Vim-friendly keys** — the dashboard is consistent across every tab and
+  overlay: `h/j/k/l` to move, `g/G` for ends, `H`/`L` to switch tabs, and
+  `Esc`/`q` to back out.
+
+### Changed
+
+- **Responsive startup** — the dashboard's first metric collection now runs
+  asynchronously behind a "connecting…" screen instead of blocking, and both the
+  dashboard and `kay fleet` ignore input (except quit) until the first data
+  arrives. Keys pressed during the initial 1–3 s connect no longer queue up and
+  fire when the view appears.
+
 ## [0.1.2] - 2026-07-01
 
 Internal cleanup: no behavior change and no new features. Reduces duplication,

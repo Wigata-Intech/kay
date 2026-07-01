@@ -4,6 +4,7 @@
 package dashboard
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"syscall"
@@ -124,6 +125,47 @@ func TestLoopTickTriggersCollect(t *testing.T) {
 	<-ran // a tick must have started a collection (the client was queried)
 	ev <- tui.Event{Rune: 'q'}
 	<-done
+}
+
+func TestApplyKeyEventLoadingGuard(t *testing.T) {
+	m := newModel()
+	m.loading = true
+	m.have = false
+	m.tab = tabOverview
+
+	// A tab-switch key is swallowed while loading.
+	if quit := m.applyKeyEvent(tui.Event{Rune: 'L'}, func() {}); quit {
+		t.Error("non-quit key should not quit")
+	}
+	if m.tab != tabOverview {
+		t.Errorf("tab changed to %d while loading, want %d (ignored)", m.tab, tabOverview)
+	}
+	// Quit still works while loading.
+	if !m.applyKeyEvent(tui.Event{Rune: 'q'}, func() {}) {
+		t.Error("q should quit even while loading")
+	}
+	if !m.applyKeyEvent(tui.Event{Type: tui.EventQuit}, func() {}) {
+		t.Error("EventQuit should quit while loading")
+	}
+}
+
+func TestApplyCollectClearsLoading(t *testing.T) {
+	t.Run("success clears loading", func(t *testing.T) {
+		m := newModel()
+		m.loading = true
+		m.applyCollect(collectResult{snap: sampleSnap()})
+		if m.loading {
+			t.Error("applyCollect should clear loading on success")
+		}
+	})
+	t.Run("error also clears loading", func(t *testing.T) {
+		m := newModel()
+		m.loading = true
+		m.applyCollect(collectResult{err: errors.New("boom")})
+		if m.loading {
+			t.Error("applyCollect should clear loading even on error")
+		}
+	})
 }
 
 func TestLoopIntervalChangeResetsTick(t *testing.T) {

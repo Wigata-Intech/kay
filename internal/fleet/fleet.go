@@ -52,6 +52,7 @@ type fleetView struct {
 	anon       bool
 	results    chan []hostState
 	collecting bool
+	loaded     bool // true after the first collection returns (gates input)
 }
 
 // Run shows the fleet overview until the user quits. It owns the terminal
@@ -126,12 +127,19 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 	for {
 		select {
 		case ev := <-events:
-			if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
+			// Until the first collection lands, swallow input (except quit) so keys
+			// typed during the initial connect don't queue up and fire at once.
+			if v.loaded {
+				if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
+					return nil
+				}
+			} else if ev.Type == tui.EventQuit || ev.Rune == 'q' {
 				return nil
 			}
 			draw()
 		case st := <-v.results:
 			v.collecting = false
+			v.loaded = true
 			v.states = st
 			draw()
 		case <-tick:
