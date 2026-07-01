@@ -59,12 +59,13 @@ jobs:
           go-version: '1.26.x'
           check-latest: true
       - name: gosec
-        uses: securego/gosec@master
-        with:
-          # G115 (integer overflow on conversion) is excluded: it is noisy on
-          # /proc parsing and not a real risk here. //nosec directives cover the
-          # remaining intentional cases.
-          args: -exclude=G115 ./...
+        # Run gosec through the setup-go toolchain (identical to `make gosec`)
+        # rather than the securego/gosec Docker image, whose bundled Go can lag
+        # a release behind go.mod and fail with "go.mod requires go >= ...".
+        # This keeps CI == local. G115 (integer overflow on conversion) is
+        # excluded: noisy on /proc parsing, not a real risk here. //#nosec
+        # directives cover the remaining intentional cases.
+        run: go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude=G115 ./...
 
   govulncheck:
     runs-on: ubuntu-latest

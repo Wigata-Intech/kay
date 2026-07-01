@@ -67,7 +67,7 @@ remote box? See [Verifying locally](#verifying-locally-with-your-own-sshd).
 
 ## Prerequisite
 
-- Go 1.26.4 (declared in `go.mod`) to build from source.
+- Go 1.26+ (declared in `go.mod`) to build from source.
 - Remotes: Linux with `sshd` and standard tools (`/proc`, `ps`, `nproc`).
   `docker` is optional — the dashboard shows it only if present.
 
