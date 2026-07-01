@@ -2,9 +2,8 @@ name: "kay CodeQL config"
 
 # kay runs CodeQL via advanced setup (this repo's .github/workflows/codeql.yml)
 # rather than GitHub default setup, solely so we can carry the query-filter
-# below. Keep the default query suites otherwise — scanning stays strict.
-queries:
-  - uses: security-extended
+# below. No `queries:` block is set, so the same default query suite as default
+# setup runs — scanning stays at parity, minus the single excluded query.
 
 query-filters:
   # go/insecure-hostkeycallback flags ssh.InsecureIgnoreHostKey() in
