@@ -4,6 +4,7 @@ package fleet
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func (s *fakeScreen) Size() (int, int) { return s.w, s.h }
 func (s *fakeScreen) Draw([]string)    { s.mu.Lock(); s.n++; s.mu.Unlock() }
 func (s *fakeScreen) draws() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
 
-// newFleetView builds a one-host view whose Dial always fails, so collectAll
+// newFleetView builds a one-host view whose Dial always fails, so a collection
 // returns quickly without a real connection.
 func newFleetView() *fleetView {
 	return &fleetView{
@@ -35,7 +36,7 @@ func newFleetView() *fleetView {
 		}},
 		states:   make([]hostState, 1),
 		interval: time.Second,
-		results:  make(chan []hostState, 1),
+		results:  make(chan hostUpdate, 1),
 	}
 }
 
@@ -76,60 +77,98 @@ func TestFleetLoopQuit(t *testing.T) {
 
 func TestFleetLoopEnterDrillsIn(t *testing.T) {
 	v := newFleetView()
-	v.results = make(chan []hostState) // unbuffered: deterministic hand-off
+	v.results = make(chan hostUpdate) // unbuffered: deterministic hand-off
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
-	v.results <- []hostState{{ok: true}} // load so input is accepted and rows exist
+	// Host 0 reports ready, so Enter drills into it.
+	v.results <- hostUpdate{index: 0, state: hostState{ok: true}}
 	ev <- tui.Event{Key: tui.KeyEnter}
 	host := <-done
 	if host == nil {
-		t.Fatal("Enter should return the selected host to drill into")
+		t.Fatal("Enter on a ready host should return it to drill into")
 	}
 	if host.Server.Alias != "a" {
 		t.Errorf("drilled host alias = %q, want a", host.Server.Alias)
 	}
 }
 
-func TestFleetLoopResultRedraws(t *testing.T) {
+func TestFleetLoopEnterNotReady(t *testing.T) {
 	v := newFleetView()
-	v.results = make(chan []hostState) // unbuffered: deterministic hand-off
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
-	updated := []hostState{{ok: true}}
-	v.results <- updated
+	// No result yet: the host is still connecting. Enter must not drill.
+	ev <- tui.Event{Key: tui.KeyEnter}
+	ev <- tui.Event{Rune: 'q'}
+	if host := <-done; host != nil {
+		t.Errorf("Enter on a not-ready host should not drill, got %v", host)
+	}
+}
+
+func TestFleetLoopResultRedraws(t *testing.T) {
+	v := newFleetView()
+	v.results = make(chan hostUpdate) // unbuffered: deterministic hand-off
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, ticker, done := startFleetLoop(v, scr)
+	defer ticker.Stop()
+
+	v.results <- hostUpdate{index: 0, state: hostState{ok: true}}
 	ev <- tui.Event{Rune: 'q'}
 	<-done
-	if v.collecting {
-		t.Error("collecting should be cleared after a result")
-	}
 	if !v.states[0].ok {
-		t.Error("states should be replaced by the collection result")
+		t.Error("state[0] should be replaced by the streamed result")
 	}
 	if got := scr.draws(); got < 2 {
 		t.Errorf("draws = %d, want >= 2 (initial + result)", got)
 	}
 }
 
-func TestFleetLoopIgnoresKeysUntilLoaded(t *testing.T) {
+func TestFleetLoopIntervalChange(t *testing.T) {
 	v := newFleetView()
-	v.results = make(chan []hostState) // unbuffered: deterministic hand-off
 	scr := &fakeScreen{w: 100, h: 30}
 	ev, _, ticker, done := startFleetLoop(v, scr)
 	defer ticker.Stop()
 
 	start := v.interval
-	ev <- tui.Event{Rune: '+'}           // ignored: not loaded yet
-	v.results <- []hostState{{ok: true}} // first result => loaded
-	ev <- tui.Event{Rune: '+'}           // now applied: interval grows
+	ev <- tui.Event{Rune: '+'} // input is live immediately (no global gate)
 	ev <- tui.Event{Rune: 'q'}
 	<-done
 
 	if v.interval != start+time.Second {
-		t.Errorf("interval = %v, want %v (only the post-load + counts)", v.interval, start+time.Second)
+		t.Errorf("interval = %v, want %v", v.interval, start+time.Second)
+	}
+}
+
+func TestEnterHost(t *testing.T) {
+	v := &fleetView{
+		hosts:  []Host{{Server: config.Server{Alias: "a"}}},
+		states: make([]hostState, 1),
+	}
+
+	// Still connecting (zero state): no drill, "connecting" status.
+	if h := v.enterHost(); h != nil {
+		t.Error("connecting host should not drill in")
+	}
+	if !strings.Contains(v.status, "connecting") {
+		t.Errorf("status = %q, want a connecting message", v.status)
+	}
+
+	// Offline (error): no drill, "offline" status.
+	v.states[0] = hostState{err: errors.New("dial refused")}
+	if h := v.enterHost(); h != nil {
+		t.Error("offline host should not drill in")
+	}
+	if !strings.Contains(v.status, "offline") {
+		t.Errorf("status = %q, want an offline message", v.status)
+	}
+
+	// Ready: drills in.
+	v.states[0] = hostState{ok: true}
+	if h := v.enterHost(); h == nil || h.Server.Alias != "a" {
+		t.Errorf("ready host should drill in, got %v", h)
 	}
 }
 

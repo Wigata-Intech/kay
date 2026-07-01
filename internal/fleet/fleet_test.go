@@ -198,7 +198,7 @@ func TestRender(t *testing.T) {
 	t.Run("fits within bounds and shows cells", func(t *testing.T) {
 		var list tui.List
 		const w, h = 100, 20
-		out := render(hosts, states, &list, 5*time.Second, w, h, false)
+		out := render(hosts, states, &list, 5*time.Second, "", w, h, false)
 		if len(out) > h {
 			t.Fatalf("render produced %d lines, exceeds height %d", len(out), h)
 		}
@@ -217,7 +217,7 @@ func TestRender(t *testing.T) {
 
 	t.Run("too small returns a hint", func(t *testing.T) {
 		var list tui.List
-		out := render(hosts, states, &list, time.Second, 20, 4, false)
+		out := render(hosts, states, &list, time.Second, "", 20, 4, false)
 		joined := strings.Join(out, "\n")
 		if !strings.Contains(joined, "terminal too small") {
 			t.Errorf("expected too-small hint, got %q", joined)
@@ -227,7 +227,7 @@ func TestRender(t *testing.T) {
 	t.Run("wide terminal clamps content width", func(t *testing.T) {
 		var list tui.List
 		const w, h = 200, 24
-		out := render(hosts, states, &list, time.Second, w, h, false)
+		out := render(hosts, states, &list, time.Second, "", w, h, false)
 		if len(out) > h {
 			t.Fatalf("render produced %d lines, exceeds height %d", len(out), h)
 		}

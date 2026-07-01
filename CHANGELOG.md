@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   for stdin. Internally `fleet.RunView`/`dashboard.RunView` run a view against a
   caller-owned screen + event channel; `cmd/kay` coordinates the two. `kay fleet`
   gains `--read-only` for the drilled-in dashboard.
+- **Per-host fleet state** — the fleet overview now collects each host
+  independently and streams results in as they arrive, so one slow or unreachable
+  host no longer freezes the whole view or blocks input. The overview is
+  interactive immediately; Enter on a host that is still connecting or offline
+  shows a brief message instead of drilling in, and only ready hosts open.
 
 - **Top containers (`docker stats`)** — press `t` in the dashboard's Docker tab
   to open a live, sortable "top containers" overlay: CPU%, memory% (coloured),
