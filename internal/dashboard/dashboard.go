@@ -86,6 +86,7 @@ type model struct {
 	diskExpl    *diskExplorer  // non-nil while drilling into a mount with du
 	dockStats   *dockStatsView // non-nil while the docker-stats overlay is open
 	notice      string         // non-empty shows a dismissable modal message
+	help        bool           // true shows the full key-binding overlay
 
 	overviewLayout []config.PanelPref             // nil = built-in default order
 	saveLayout     func([]config.PanelPref) error // persists a customised layout

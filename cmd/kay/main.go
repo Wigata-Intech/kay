@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -70,6 +71,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := h(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return // `-h`/`--help` on a subcommand: flag already printed its usage
+		}
 		fmt.Fprintln(os.Stderr, "kay: "+err.Error())
 		os.Exit(1)
 	}
@@ -148,6 +152,15 @@ Usage:
   kay fleet [--interval 5s] [--insecure] [--anonymize] [--color auto|always|never]
   kay ls
   kay version
+
+Examples:
+  kay key gen --name laptop                         generate a key
+  kay server add --alias web --host 10.0.0.1 --user ubuntu --key laptop
+  kay install --alias web --push                    install the key over a password login
+  kay dashboard --alias web                         watch one host (press ? for keys)
+  kay fleet                                          watch every host; Enter drills in
+
+Run any subcommand with -h for its flags.
 `)
 }
 

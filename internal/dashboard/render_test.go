@@ -79,6 +79,23 @@ func TestOverviewSystem(t *testing.T) {
 	}
 }
 
+func TestHelpOverlay(t *testing.T) {
+	noColor(t)
+	m := newModel()
+	m.handleKey(tui.Event{Rune: '?'})
+	if !m.help {
+		t.Fatal("? should open the help overlay")
+	}
+	m.handleKey(tui.Event{Rune: 'j'})
+	if m.help {
+		t.Error("any key should close the help overlay")
+	}
+	m.help = true
+	if out := strings.Join(m.render(100, 40), "\n"); !strings.Contains(out, "Keybindings") {
+		t.Errorf("help overlay not rendered:\n%s", out)
+	}
+}
+
 func TestOverviewMemoryAndDisk(t *testing.T) {
 	noColor(t)
 	m := newModel()

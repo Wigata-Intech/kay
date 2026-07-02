@@ -26,6 +26,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`?` help overlay** — press `?` in the dashboard or `kay fleet` for a
+  full, context-grouped key-binding reference; any key closes it. Footers now
+  advertise `? help`.
+- **Better command help** — every subcommand accepts `-h`/`--help` and prints its
+  flags cleanly (exit 0), and `kay` with no arguments now leads with examples.
 - **More Overview panels & metrics** — the batched metrics script (still one SSH
   round-trip) now also collects **per-core CPU**, **swap** and **cached** memory,
   **inode usage** per filesystem, **TCP connection counts** (`/proc/net/sockstat`),

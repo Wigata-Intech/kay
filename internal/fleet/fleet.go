@@ -70,6 +70,7 @@ type fleetView struct {
 	interval time.Duration
 	anon     bool
 	status   string // transient message (e.g. "still connecting"), cleared on next key
+	help     bool   // true shows the key-binding overlay
 	results  chan hostUpdate
 	inflight int // hosts still collecting in the current round
 }
@@ -206,6 +207,10 @@ func (v *fleetView) trigger() {
 func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Selection {
 	draw := func() {
 		w, h := scr.Size()
+		if v.help {
+			scr.Draw(renderFleetHelp(w, h))
+			return
+		}
 		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, v.status, w, h, v.anon))
 	}
 	draw()
@@ -214,11 +219,16 @@ func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.T
 		select {
 		case ev := <-events:
 			v.status = "" // clear any transient message on the next keypress
-			if ev.Key == tui.KeyEnter {
+			switch {
+			case v.help:
+				v.help = false // any key closes the help overlay
+			case ev.Rune == '?':
+				v.help = true
+			case ev.Key == tui.KeyEnter:
 				if sel := v.enterHost(); sel != nil {
 					return sel // drill into a ready host's dashboard
 				}
-			} else if handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger) {
+			case handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger):
 				return nil // quit
 			}
 			draw()
@@ -346,8 +356,34 @@ func render(hosts []Host, states []hostState, list *tui.List, interval time.Dura
 		out = append(out, tui.ClampLine(status, cw))
 	} else {
 		out = append(out, tui.Dim(tui.ClampLine(
-			"j/k select · Enter open host · r refresh · +/- interval · q quit", cw)))
+			"j/k select · Enter open host · r refresh · +/- interval · ? help · q quit", cw)))
 	}
+	return tui.ClampAll(out, w, h)
+}
+
+// fleetHelpSections is the key-binding reference shown by the `?` overlay.
+func fleetHelpSections() []tui.HelpSection {
+	return []tui.HelpSection{
+		{Title: "Fleet", Keys: [][2]string{
+			{"j/k ↑↓", "select host"}, {"g / G", "top / bottom"},
+			{"Enter", "open host dashboard"}, {"r", "refresh now"},
+			{"+ / -", "change interval"}, {"?", "this help"}, {"q", "quit"},
+		}},
+	}
+}
+
+// renderFleetHelp draws the full-screen key-binding overlay.
+func renderFleetHelp(w, h int) []string {
+	if w < 40 || h < 8 {
+		return []string{"", fmt.Sprintf("  terminal too small — need >=40x8, have %dx%d", w, h)}
+	}
+	cw := w
+	if cw > 120 {
+		cw = 120
+	}
+	out := []string{tui.Bold(tui.ClampLine("kay fleet · keybindings", cw))}
+	out = append(out, tui.Box("Keybindings", tui.RenderHelp(fleetHelpSections()), cw, h-4)...)
+	out = append(out, tui.Dim(tui.ClampLine("press any key to close", cw)))
 	return tui.ClampAll(out, w, h)
 }
 

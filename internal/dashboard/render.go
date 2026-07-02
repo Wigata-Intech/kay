@@ -104,6 +104,8 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 		return m.overlayFrame("", []string{"", "  connecting…", ""}, dim("q quit"), cw, innerH, w, h), true
 	case m.notice != "":
 		return m.overlayFrame("Notice", []string{"", "  " + m.notice, ""}, dim("press any key to dismiss"), cw, innerH, w, h), true
+	case m.help:
+		return m.overlayFrame("Keybindings", tui.RenderHelp(helpSections()), dim("press any key to close"), cw, innerH, w, h), true
 	case m.detail != nil:
 		body := m.renderDetailBody(innerW, innerH)
 		return m.overlayFrame(m.detailTitle, body, m.detailFooter(cw), cw, innerH, w, h), true
@@ -291,8 +293,36 @@ func (m *model) blockedReadOnly() bool {
 	return false
 }
 
+// helpSections is the full key-binding reference shown by the `?` overlay,
+// grouped by context.
+func helpSections() []tui.HelpSection {
+	return []tui.HelpSection{
+		{Title: "Global", Keys: [][2]string{
+			{"Tab / H / L / 1-5", "switch tabs"}, {"r", "refresh now"},
+			{"+ / -", "change interval"}, {"?", "this help"}, {"q", "quit / back"},
+		}},
+		{Title: "Lists (Processes/Docker/Network/Disk)", Keys: [][2]string{
+			{"j/k ↑↓", "select"}, {"g / G", "top / bottom"},
+			{"Ctrl-U / Ctrl-D", "page"}, {"Enter", "details / inspect"},
+		}},
+		{Title: "Overview", Keys: [][2]string{{"o", "customise panels (reorder / hide)"}}},
+		{Title: "Processes", Keys: [][2]string{
+			{"s", "cycle sort (CPU/MEM/PID/name)"}, {"x / X", "SIGTERM / SIGKILL (confirm)"},
+		}},
+		{Title: "Docker", Keys: [][2]string{
+			{"l", "logs"}, {"t", "stats (top)"}, {"R / x", "restart / stop (confirm)"},
+		}},
+		{Title: "Disk", Keys: [][2]string{
+			{"Enter / l", "explore mount (du)"}, {".", "toggle hidden"}, {"h / ⌫", "up a level"},
+		}},
+		{Title: "Detail / logs", Keys: [][2]string{
+			{"j/k h/l", "scroll / pan"}, {"/", "search (n/N next)"}, {"Esc / q", "back"},
+		}},
+	}
+}
+
 func (m *model) keyHints() string {
-	base := "Tab/H/L tabs · r refresh · +/- interval · q quit"
+	base := "Tab/H/L tabs · r refresh · +/- interval · ? help · q quit"
 	if m.readOnly {
 		base = tui.Yellow("[read-only]") + " " + base
 	}

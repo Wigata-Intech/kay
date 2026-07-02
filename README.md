@@ -119,7 +119,7 @@ never pollutes your scrollback and restores your previous view on exit.
 
 ```
 Tabs    : Tab / Shift-Tab · [ / ] · H / L · or 1-5   → Overview · Processes · Docker · Network · Disk
-Global  : r refresh now · +/- change interval · q quit
+Global  : r refresh now · +/- change interval · ? help (full keymap) · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
 Process : s cycle sort (CPU/MEM/PID/name) · x SIGTERM · X SIGKILL   (asks y/N first)
 Docker  : l logs · t stats (top by CPU/MEM) · R restart · x stop   (restart/stop ask y/N first)

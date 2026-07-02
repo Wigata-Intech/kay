@@ -546,6 +546,31 @@ func TestNewSessionWiresConns(t *testing.T) {
 	}
 }
 
+func TestRenderFleetHelp(t *testing.T) {
+	noColor(t)
+	out := strings.Join(renderFleetHelp(100, 30), "\n")
+	for _, want := range []string{"Keybindings", "open host dashboard", "quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("fleet help missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFleetHelpToggle(t *testing.T) {
+	v := newFleetView(&fakeConn{state: sshx.StateConnecting})
+	scr := &fakeScreen{w: 100, h: 30}
+	ev, _, ticker, done := startFleetLoop(v, scr)
+	defer ticker.Stop()
+
+	ev <- tui.Event{Rune: '?'} // open help
+	ev <- tui.Event{Rune: 'x'} // any key closes it
+	ev <- tui.Event{Rune: 'q'} // quit
+	<-done
+	if v.help {
+		t.Error("help should be closed after a keypress")
+	}
+}
+
 func TestFleetLoopTickTriggersCollect(t *testing.T) {
 	ran := make(chan struct{}, 1)
 	v := newFleetView(&fakeConn{state: sshx.StateReady, ran: ran})

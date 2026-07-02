@@ -11,28 +11,8 @@ import (
 func (m *model) handleKey(ev tui.Event) keyResult {
 	m.status = ""
 
-	if m.notice != "" {
-		m.notice = "" // any key dismisses the modal
-		return keyResult{}
-	}
-
-	if m.detail != nil {
-		return m.handleDetailKey(ev)
-	}
-
-	if m.diskExpl != nil {
-		m.handleDiskExplorerKey(ev)
-		return keyResult{}
-	}
-
-	if m.dockStats != nil {
-		m.handleDockStatsKey(ev)
-		return keyResult{}
-	}
-
-	if m.layoutEdit != nil {
-		m.handleLayoutEditKey(ev)
-		return keyResult{}
+	if r, handled := m.handleOverlayKey(ev); handled {
+		return r
 	}
 
 	if m.confirm != nil {
@@ -71,6 +51,32 @@ func (m *model) overviewAction(ev tui.Event) {
 	}
 }
 
+// handleOverlayKey routes input to whichever modal overlay is active, returning
+// handled=true when one consumed the event. Overlays are mutually exclusive; a
+// dismissable one (notice/help) closes on any key.
+func (m *model) handleOverlayKey(ev tui.Event) (keyResult, bool) {
+	switch {
+	case m.notice != "":
+		m.notice = ""
+		return keyResult{}, true
+	case m.help:
+		m.help = false
+		return keyResult{}, true
+	case m.detail != nil:
+		return m.handleDetailKey(ev), true
+	case m.diskExpl != nil:
+		m.handleDiskExplorerKey(ev)
+		return keyResult{}, true
+	case m.dockStats != nil:
+		m.handleDockStatsKey(ev)
+		return keyResult{}, true
+	case m.layoutEdit != nil:
+		m.handleLayoutEditKey(ev)
+		return keyResult{}, true
+	}
+	return keyResult{}, false
+}
+
 // diskAction opens the du drill-down when Enter is pressed on a mount.
 func (m *model) diskAction(ev tui.Event) {
 	if ev.Key != tui.KeyEnter {
@@ -88,6 +94,9 @@ func (m *model) handleGlobalKey(ev tui.Event) (r keyResult, handled bool) {
 	switch {
 	case ev.Rune == 'q':
 		return keyResult{quit: true}, true
+	case ev.Rune == '?':
+		m.help = true
+		return keyResult{}, true
 	case ev.Key == tui.KeyTab:
 		m.tab = (m.tab + 1) % len(tabNames)
 	case ev.Key == tui.KeyShiftTab, ev.Rune == '[', ev.Rune == 'H':
