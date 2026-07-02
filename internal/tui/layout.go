@@ -45,6 +45,39 @@ func Columns(blocks [][]string, gap int) []string {
 	return out
 }
 
+// ColumnsDivided lays column blocks across a fixed total width by padding every
+// column to colWidth and joining them with divider (e.g. a dim vertical bar), so
+// the columns fill the available width and are visually separated. Shorter
+// columns are padded with blank cells, keeping the divider continuous top to
+// bottom. Use this (over Columns) when you want equal, width-filling columns.
+func ColumnsDivided(cols [][]string, colWidth int, divider string) []string {
+	if len(cols) == 0 || colWidth < 1 {
+		return nil
+	}
+	maxLines := 0
+	for _, c := range cols {
+		if len(c) > maxLines {
+			maxLines = len(c)
+		}
+	}
+	out := make([]string, 0, maxLines)
+	for row := 0; row < maxLines; row++ {
+		var sb strings.Builder
+		for i, c := range cols {
+			if i > 0 {
+				sb.WriteString(divider)
+			}
+			var cell string
+			if row < len(c) {
+				cell = c[row]
+			}
+			sb.WriteString(PadVisible(cell, colWidth))
+		}
+		out = append(out, sb.String())
+	}
+	return out
+}
+
 // ColumnCount picks how many columns of content to lay out for a terminal of the
 // given width, given the minimum usable width of one column. It never returns
 // more than max, and always at least 1. This centralises the responsive

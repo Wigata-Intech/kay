@@ -32,6 +32,25 @@ func Gauge(label string, pct float64, width int, suffix string) string {
 
 var sparkRunes = []rune("▁▂▃▄▅▆▇█")
 
+// SparkCells renders each value (0..100) as a block character coloured by its
+// own threshold — for per-entity levels (e.g. per-core CPU) where each cell's
+// colour should reflect that cell, unlike Sparkline which colours the whole run
+// by the latest value.
+func SparkCells(v []float64) string {
+	var b strings.Builder
+	for _, x := range v {
+		if x < 0 {
+			x = 0
+		}
+		if x > 100 {
+			x = 100
+		}
+		r := sparkRunes[int(x/100*float64(len(sparkRunes)-1)+0.5)]
+		b.WriteString(ThreshColor(string(r), x))
+	}
+	return b.String()
+}
+
 // Sparkline renders values (each 0..100) as a compact block-character trend,
 // coloured by the latest value. Returns a dim placeholder when empty. Only the
 // most recent width values are shown.

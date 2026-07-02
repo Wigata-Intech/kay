@@ -162,20 +162,48 @@ func (m *model) renderOverview(width int) []string {
 	return layoutPanels(blocks, width)
 }
 
+// overviewSystem is the CPU/load panel body: CPU gauge, per-core levels, load,
+// and the CPU trend sparkline.
 func (m *model) overviewSystem(s metrics.Snapshot) []string {
-	L := []string{
-		tui.Gauge("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU)),
-		tui.Gauge("MEM", s.MemUsedPercent, 18,
-			fmt.Sprintf("%s / %s", humanKB(s.MemTotalKB-s.MemAvailableKB), humanKB(s.MemTotalKB))),
-	}
-	if d, ok := s.RootDisk(); ok {
-		L = append(L, tui.Gauge("DISK", d.UsedPercent(), 18,
-			fmt.Sprintf("%s (%s)", d.Mount, tui.HumanBytes(float64(d.TotalBytes)))))
+	L := []string{tui.Gauge("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU))}
+	if len(s.PerCPU) > 0 {
+		L = append(L, "core "+tui.SparkCells(s.PerCPU))
 	}
 	L = append(L, fmt.Sprintf("LOAD %s %.2f %.2f",
 		loadColor(s.Load1, s.NumCPU, fmt.Sprintf("%.2f", s.Load1)), s.Load5, s.Load15))
-	L = append(L, "cpu "+tui.Sparkline(m.cpuHist, 16))
-	L = append(L, "mem "+tui.Sparkline(m.memHist, 16))
+	L = append(L, "cpu  "+tui.Sparkline(m.cpuHist, 16))
+	return L
+}
+
+// overviewMemory is the memory panel body: RAM gauge, swap gauge (when present),
+// cached, and the memory trend sparkline.
+func (m *model) overviewMemory(s metrics.Snapshot) []string {
+	L := []string{tui.Gauge("MEM", s.MemUsedPercent, 18,
+		fmt.Sprintf("%s / %s", humanKB(s.MemTotalKB-s.MemAvailableKB), humanKB(s.MemTotalKB)))}
+	if s.SwapTotalKB > 0 {
+		swapPct := float64(s.SwapTotalKB-s.SwapFreeKB) / float64(s.SwapTotalKB) * 100
+		L = append(L, tui.Gauge("SWAP", swapPct, 18,
+			fmt.Sprintf("%s / %s", humanKB(s.SwapTotalKB-s.SwapFreeKB), humanKB(s.SwapTotalKB))))
+	}
+	if s.CachedKB > 0 {
+		L = append(L, tui.Dim(fmt.Sprintf("cached %s", humanKB(s.CachedKB))))
+	}
+	L = append(L, "mem  "+tui.Sparkline(m.memHist, 16))
+	return L
+}
+
+// overviewDisk is the disk panel body: the root filesystem's space gauge plus its
+// inode utilisation (inodes can exhaust with space free).
+func (m *model) overviewDisk(s metrics.Snapshot) []string {
+	d, ok := s.RootDisk()
+	if !ok {
+		return []string{tui.Dim("no filesystems")}
+	}
+	L := []string{tui.Gauge("DISK", d.UsedPercent(), 18,
+		fmt.Sprintf("%s (%s)", d.Mount, tui.HumanBytes(float64(d.TotalBytes))))}
+	if d.InodesTotal > 0 {
+		L = append(L, tui.Gauge("INOD", d.InodesPercent(), 18, "inodes"))
+	}
 	return L
 }
 

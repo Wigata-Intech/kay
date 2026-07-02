@@ -26,21 +26,21 @@ func TestEffectiveLayout(t *testing.T) {
 		saved []config.PanelPref
 		want  []string
 	}{
-		{name: "nil is the default order", saved: nil, want: []string{"system", "procs", "net", "docker"}},
+		{name: "nil is the default order", saved: nil, want: []string{"system", "memory", "procs", "disk", "net", "docker"}},
 		{
 			name:  "custom order, missing panels appended",
 			saved: []config.PanelPref{{Name: "docker"}, {Name: "system", Hidden: true}},
-			want:  []string{"docker", "system", "procs", "net"},
+			want:  []string{"docker", "system", "memory", "procs", "disk", "net"},
 		},
 		{
 			name:  "unknown names dropped",
 			saved: []config.PanelPref{{Name: "bogus"}, {Name: "net"}},
-			want:  []string{"net", "system", "procs", "docker"},
+			want:  []string{"net", "system", "memory", "procs", "disk", "docker"},
 		},
 		{
 			name:  "duplicates collapsed",
 			saved: []config.PanelPref{{Name: "system"}, {Name: "system"}},
-			want:  []string{"system", "procs", "net", "docker"},
+			want:  []string{"system", "memory", "procs", "disk", "net", "docker"},
 		},
 	}
 	for _, tt := range tests {
@@ -84,10 +84,11 @@ func TestRenderOverviewCustom(t *testing.T) {
 	})
 
 	t.Run("all hidden shows a hint", func(t *testing.T) {
-		m := &model{overviewLayout: []config.PanelPref{
-			{Name: "system", Hidden: true}, {Name: "procs", Hidden: true},
-			{Name: "net", Hidden: true}, {Name: "docker", Hidden: true},
-		}}
+		hidden := make([]config.PanelPref, len(overviewPanels))
+		for i, p := range overviewPanels {
+			hidden[i] = config.PanelPref{Name: p.name, Hidden: true}
+		}
+		m := &model{overviewLayout: hidden}
 		out := strings.Join(m.renderOverview(120), "\n")
 		if !strings.Contains(out, "all panels hidden") {
 			t.Errorf("expected all-hidden hint, got %q", out)
@@ -136,15 +137,16 @@ func TestRenderLayoutEditor(t *testing.T) {
 func TestLayoutEditorReorderAndHide(t *testing.T) {
 	m := &model{}
 	m.openLayoutEditor()
-	if m.layoutEdit == nil || len(m.layoutEdit.panels) != 4 {
-		t.Fatalf("editor should start with 4 panels")
+	if m.layoutEdit == nil || len(m.layoutEdit.panels) != len(overviewPanels) {
+		t.Fatalf("editor should start with all %d panels", len(overviewPanels))
 	}
 
-	// j moves down, J swaps the second panel up to the top.
+	// j moves down to the second panel, K swaps it up to the top.
+	second := m.layoutEdit.panels[1].Name
 	m.handleLayoutEditKey(tui.Event{Rune: 'j'})
 	m.handleLayoutEditKey(tui.Event{Rune: 'K'})
-	if got := m.layoutEdit.panels[0].Name; got != "procs" {
-		t.Errorf("after moving up, top panel = %q, want procs", got)
+	if got := m.layoutEdit.panels[0].Name; got != second {
+		t.Errorf("after moving up, top panel = %q, want %q", got, second)
 	}
 	if m.layoutEdit.sel != 0 {
 		t.Errorf("selection should follow the moved panel, sel = %d", m.layoutEdit.sel)
@@ -182,8 +184,8 @@ func TestApplyLayoutPersists(t *testing.T) {
 		if m.layoutEdit != nil {
 			t.Error("save should close the editor")
 		}
-		if len(saved) != 4 {
-			t.Fatalf("saver got %d panels, want 4", len(saved))
+		if len(saved) != len(overviewPanels) {
+			t.Fatalf("saver got %d panels, want %d", len(saved), len(overviewPanels))
 		}
 		if m.overviewLayout == nil {
 			t.Error("layout should be applied to the model")

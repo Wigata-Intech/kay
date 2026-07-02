@@ -71,12 +71,22 @@ func TestOverviewProcs(t *testing.T) {
 func TestOverviewSystem(t *testing.T) {
 	noColor(t)
 	m := newModel()
-	out := m.overviewSystem(m.snap)
-	joined := strings.Join(out, "\n")
-	for _, want := range []string{"CPU", "MEM", "DISK", "LOAD", "cpu", "mem"} {
+	joined := strings.Join(m.overviewSystem(m.snap), "\n")
+	for _, want := range []string{"CPU", "LOAD", "cpu"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("overviewSystem missing %q in:\n%s", want, joined)
 		}
+	}
+}
+
+func TestOverviewMemoryAndDisk(t *testing.T) {
+	noColor(t)
+	m := newModel()
+	if got := strings.Join(m.overviewMemory(m.snap), "\n"); !strings.Contains(got, "MEM") || !strings.Contains(got, "mem") {
+		t.Errorf("overviewMemory missing MEM/mem trend:\n%s", got)
+	}
+	if got := strings.Join(m.overviewDisk(m.snap), "\n"); !strings.Contains(got, "DISK") {
+		t.Errorf("overviewDisk missing DISK:\n%s", got)
 	}
 }
 

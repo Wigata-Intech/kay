@@ -43,6 +43,34 @@ func TestColumns(t *testing.T) {
 	})
 }
 
+func TestColumnsDivided(t *testing.T) {
+	old := tui.ColorEnabled
+	tui.ColorEnabled = false
+	defer func() { tui.ColorEnabled = old }()
+
+	t.Run("fills each column to width and inserts the divider", func(t *testing.T) {
+		out := tui.ColumnsDivided([][]string{{"a"}, {"b1", "b2"}}, 4, " | ")
+		if len(out) != 2 { // max of the two column heights
+			t.Fatalf("lines = %d, want 2", len(out))
+		}
+		if out[0] != "a   "+" | "+"b1  " {
+			t.Errorf("row 0 = %q", out[0])
+		}
+		if out[1] != "    "+" | "+"b2  " { // shorter column padded blank, divider continues
+			t.Errorf("row 1 = %q", out[1])
+		}
+	})
+
+	t.Run("guards", func(t *testing.T) {
+		if tui.ColumnsDivided(nil, 4, " | ") != nil {
+			t.Error("nil cols → nil")
+		}
+		if tui.ColumnsDivided([][]string{{"x"}}, 0, " | ") != nil {
+			t.Error("colWidth 0 → nil")
+		}
+	})
+}
+
 func TestColumnCount(t *testing.T) {
 	tests := []struct {
 		name                          string

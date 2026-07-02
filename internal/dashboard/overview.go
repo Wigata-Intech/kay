@@ -12,7 +12,9 @@ import (
 // compatibility) and any known panel missing from a saved layout is appended.
 var overviewPanels = []struct{ name, title string }{
 	{"system", "System"},
+	{"memory", "Memory"},
 	{"procs", "Top processes"},
+	{"disk", "Disk"},
 	{"net", "Network"},
 	{"docker", "Docker"},
 }
@@ -65,8 +67,12 @@ func (m *model) renderPanel(name string) []string {
 	switch name {
 	case "system":
 		return append([]string{tui.Cyan("System")}, m.overviewSystem(s)...)
+	case "memory":
+		return append([]string{tui.Cyan("Memory")}, m.overviewMemory(s)...)
 	case "procs":
 		return append([]string{tui.Cyan("Top processes")}, m.overviewProcs(s, 6)...)
+	case "disk":
+		return append([]string{tui.Cyan("Disk")}, m.overviewDisk(s)...)
 	case "net":
 		net := m.overviewNet(4)
 		if len(net) == 0 {
@@ -82,16 +88,17 @@ func (m *model) renderPanel(name string) []string {
 // Responsive Overview column tuning: each column needs ~44 cols to hold a panel
 // comfortably, columns are gap-separated, and we never exceed three.
 const (
-	overviewMinCol = 40 // 2 cols at ≥84, 3 cols at ≥128 (with the gap below)
-	overviewGap    = 4
+	overviewMinCol = 40 // 2 cols at ≥85, 3 cols at ≥130 (with the divider below)
+	overviewGap    = 5  // width of the inter-column divider ("  │  ")
 	overviewMaxCol = 3
 )
 
 // layoutPanels flows panel blocks into responsive columns: one column stacks them
 // with blank separators; wider terminals get up to three columns, each new panel
 // placed in the currently-shortest column so heights stay balanced (a simple
-// masonry). This keeps the two-column look on normal terminals and uses extra
-// width for a third column instead of wasting it.
+// masonry). Columns are stretched to fill the width equally and separated by a
+// dim vertical divider, so extra width becomes breathing room rather than dead
+// space on the right.
 func layoutPanels(blocks [][]string, width int) []string {
 	n := tui.ColumnCount(width, overviewMinCol, overviewGap, overviewMaxCol)
 	if n <= 1 {
@@ -107,7 +114,12 @@ func layoutPanels(blocks [][]string, width int) []string {
 		cols[c] = append(cols[c], b...)
 		heights[c] += len(b) + 1
 	}
-	return tui.Columns(cols, overviewGap)
+	divider := "  " + tui.Dim("│") + "  "
+	colWidth := (width - (n-1)*overviewGap) / n
+	if colWidth < 1 {
+		return stackBlocks(blocks)
+	}
+	return tui.ColumnsDivided(cols, colWidth, divider)
 }
 
 // stackBlocks joins panel blocks vertically with a blank line between them.

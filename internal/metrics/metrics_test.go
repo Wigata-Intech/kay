@@ -15,11 +15,18 @@ web-1
 123456.78 987654.00
 @@CPU1
 cpu  100 0 100 800 0 0 0 0 0 0
+cpu0 50 0 50 400 0 0 0 0 0 0
+cpu1 50 0 50 400 0 0 0 0 0 0
 @@CPU2
 cpu  150 0 150 900 0 0 0 0 0 0
+cpu0 90 0 90 420 0 0 0 0 0 0
+cpu1 60 0 60 480 0 0 0 0 0 0
 @@MEM
 MemTotal:        4000000 kB
 MemAvailable:    1000000 kB
+SwapTotal:       2000000 kB
+SwapFree:        1500000 kB
+Cached:           800000 kB
 @@LOAD
 0.50 0.40 0.30 2/345 6789
 @@NCPU
@@ -33,6 +40,9 @@ Inter-|   Receive                                                |  Transmit
 /dev/sda1|4000000000|1600000000|/
 /dev/sda2|1000000000|500000000|/data
 proc|0|0|/proc
+@@INODES
+/|1000000|250000
+/data|500000|100000
 @@PROC
 999|90.0|12.5|my proc
 1|0.5|0.1|systemd
@@ -73,6 +83,19 @@ func TestParseFixture(t *testing.T) {
 		}
 		if !approx(s.MemUsedPercent, 75.0) {
 			t.Errorf("mem%% = %v", s.MemUsedPercent)
+		}
+	})
+
+	t.Run("per_core_swap_inodes", func(t *testing.T) {
+		if len(s.PerCPU) != 2 || !approx(s.PerCPU[0], 80.0) || !approx(s.PerCPU[1], 20.0) {
+			t.Errorf("per-core = %v, want [80 20]", s.PerCPU)
+		}
+		if s.SwapTotalKB != 2000000 || s.SwapFreeKB != 1500000 || s.CachedKB != 800000 {
+			t.Errorf("swap/cached = %d/%d cached=%d", s.SwapTotalKB, s.SwapFreeKB, s.CachedKB)
+		}
+		root, _ := s.RootDisk()
+		if !approx(root.InodesPercent(), 25.0) {
+			t.Errorf("root inode%% = %v, want 25 (%+v)", root.InodesPercent(), root)
 		}
 	})
 
