@@ -127,13 +127,17 @@ Stats   : c sort CPU · m sort MEM · r reload · j/k select · Esc back
 Disk    : Enter/l explore a mount (du) — dirs & files by size; . toggles hidden;
           j/k select · Enter/l/→ open dir · h/←/⌫ up · Esc back  (opening a file: notice)
 Detail  : j/k ↑↓ scroll · h/l ←→ pan · g/G ends · / search (n/N next) · Esc/q back
+Overview: o customise panels — j/k select · J/K move · space hide · w save · Esc cancel
 ```
 
 Keys are vim-friendly throughout: `h/j/k/l` move, `g/G` jump to ends, `H/L`
 switch tabs, and `Esc`/`q` back out of any overlay.
 
 The Overview shows CPU/memory sparkline history; on wide terminals it splits
-into system gauges (left) and top processes (right).
+into system gauges (left) and top processes (right). Press **`o`** to customise
+it: reorder the panels (System, Top processes, Network, Docker) with `J`/`K` and
+hide the ones you don't want with `space`, then `w` to save. Your layout persists
+in `config.json` and applies to every host's dashboard.
 
 Navigation is vim-friendly (`j/k`, `g/G`, `h/l`, `Ctrl-U/Ctrl-D`). The
 inspect/logs overlay is a scrollable, horizontally-pannable pager with `/`
@@ -289,6 +293,7 @@ standard tools.
 | Per-pane titles on two-column Overview | ✅ Done | System \| Top processes |
 | Multi-server fleet overview (one row per host) | ✅ Done | `kay fleet` — concurrent multi-host live table |
 | Persistent, self-healing fleet SSH connections | ✅ Done | v0.2 — one long-lived connection per host (`sshx.Pool`/`Managed`); reuse, backoff+jitter, dial cap, zero-handshake drill-in |
+| Customisable Overview (reorder / hide panels) | ✅ Done | v0.2 — `o` in the Overview tab; layout persists in `config.json` (`ui` section, schema `version`) |
 | Richer Overview (docker health counts, sparklines) | ✅ Done | More than gauges |
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
 | CI quality gates (lint · gosec · govulncheck) | ✅ Done | golangci-lint 0 issues + gosec + govulncheck in CI and `make ci` |

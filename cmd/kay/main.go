@@ -424,14 +424,26 @@ func cmdDashboard(args []string) error {
 		return err
 	}
 	defer client.Close()
+	panels, saveLayout := overviewLayoutOpts(st)
 	opts := dashboard.Options{
-		Interval:  *interval,
-		Color:     *color,
-		ReadOnly:  *readonly,
-		Anonymize: *anon || os.Getenv("KAY_DEMO") != "",
-		Redial:    func() (dashboard.Client, error) { return dial(st, srv, *insecure) },
+		Interval:   *interval,
+		Color:      *color,
+		ReadOnly:   *readonly,
+		Anonymize:  *anon || os.Getenv("KAY_DEMO") != "",
+		Redial:     func() (dashboard.Client, error) { return dial(st, srv, *insecure) },
+		Overview:   panels,
+		SaveLayout: saveLayout,
 	}
 	return dashboard.Run(client, *srv, opts)
+}
+
+// overviewLayoutOpts loads the saved Overview layout and returns a saver that
+// persists edits back to the store.
+func overviewLayoutOpts(st *config.Store) (panels []config.PanelPref, save func([]config.PanelPref) error) {
+	return st.OverviewPanels(), func(p []config.PanelPref) error {
+		st.SetOverviewPanels(p)
+		return st.Save()
+	}
 }
 
 // ---- fleet ----
@@ -467,7 +479,7 @@ func cmdFleet(args []string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fleet.Run(hosts, fopts)
 	}
-	return fleetDrill(hosts, fopts, *readonly)
+	return fleetDrill(st, hosts, fopts, *readonly)
 }
 
 // fleetDrill runs the interactive fleet overview with drill-in: it owns a single
@@ -475,7 +487,7 @@ func cmdFleet(args []string) error {
 // Enter on a host hands the terminal to that host's dashboard and back with no
 // flicker, no competing stdin readers, and no second SSH handshake — the
 // dashboard reuses the connection the fleet already established.
-func fleetDrill(hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
+func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 	tui.SetColorMode(fopts.Color)
 	scr, err := tui.NewScreen()
 	if err != nil {
@@ -507,11 +519,14 @@ func fleetDrill(hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 			return nil // user quit the fleet
 		}
 		srv := sel.Host.Server
+		panels, saveLayout := overviewLayoutOpts(st)
 		dopts := dashboard.Options{
-			Interval:  fopts.Interval,
-			Color:     fopts.Color,
-			ReadOnly:  readOnly,
-			Anonymize: fopts.Anonymize,
+			Interval:   fopts.Interval,
+			Color:      fopts.Color,
+			ReadOnly:   readOnly,
+			Anonymize:  fopts.Anonymize,
+			Overview:   panels,
+			SaveLayout: saveLayout,
 			// No Redial: the reused connection is pool-managed and self-heals, so
 			// the dashboard just retries its metrics over the same seam.
 		}

@@ -32,6 +32,12 @@ type Options struct {
 
 	// Redial, if set, is used to re-establish the connection after a failure.
 	Redial func() (Client, error)
+
+	// Overview is the saved Overview panel layout (nil = built-in default order).
+	Overview []config.PanelPref
+	// SaveLayout, if set, persists a customised Overview layout when the user
+	// saves it from the layout editor.
+	SaveLayout func([]config.PanelPref) error
 }
 
 var tabNames = []string{"Overview", "Processes", "Docker", "Network", "Disk"}
@@ -80,6 +86,10 @@ type model struct {
 	diskExpl    *diskExplorer  // non-nil while drilling into a mount with du
 	dockStats   *dockStatsView // non-nil while the docker-stats overlay is open
 	notice      string         // non-empty shows a dismissable modal message
+
+	overviewLayout []config.PanelPref             // nil = built-in default order
+	saveLayout     func([]config.PanelPref) error // persists a customised layout
+	layoutEdit     *layoutEditor                  // non-nil while the layout editor is open
 
 	// detail-pager search + horizontal scroll state
 	searching   bool
@@ -174,6 +184,8 @@ func RunView(scr *tui.Screen, events <-chan tui.Event, client Client, srv config
 	m := &model{srv: srv, client: client, interval: opts.Interval, readOnly: opts.ReadOnly}
 	m.redial = opts.Redial
 	m.anon = opts.Anonymize
+	m.overviewLayout = opts.Overview
+	m.saveLayout = opts.SaveLayout
 	// Collection runs in a goroutine and reports back on these channels so the
 	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
 	m.results = make(chan collectResult, 1)

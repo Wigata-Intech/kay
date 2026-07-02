@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Customisable Overview** — press `o` in the dashboard's Overview tab to reorder
+  its panels (System, Top processes, Network, Docker) and hide the ones you don't
+  want: `j/k` select, `J/K` move, `space` toggle, `w` save, `Esc` cancel. The
+  layout persists in `config.json` under a new `ui` section and applies to every
+  host. The config file gains a `version` field; older files (no version) load
+  unchanged and are upgraded in place on the next save — no migration step, no
+  data loss.
+
 - **Fleet drill-in** — press Enter on a host in `kay fleet` to open its full
   dashboard, and Esc/`q` to return to the overview; Ctrl-C (or SIGTERM) exits the
   whole app. A single screen and input reader are shared for the session, so the

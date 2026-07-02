@@ -113,6 +113,8 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 	case m.dockStats != nil:
 		title, body := m.renderDockStats(innerW, innerH)
 		return m.overlayFrame(title, body, dim("j/k select · c sort cpu · m sort mem · r reload · esc back"), cw, innerH, w, h), true
+	case m.layoutEdit != nil:
+		return m.overlayFrame("Customise Overview", m.renderLayoutEditor(), dim("j/k select · J/K move · space hide · w save · esc cancel"), cw, innerH, w, h), true
 	}
 	return nil, false
 }
@@ -140,6 +142,11 @@ func (m *model) headerBar(w int) string {
 func (m *model) renderOverview(width int) []string {
 	if m.err != nil {
 		return []string{"", tui.Red("⚠ collection error: " + tui.FirstLine(m.err.Error())), "", tui.Dim("retrying on next tick…")}
+	}
+	// A customised layout renders panels stacked in the user's order; the default
+	// (uncustomised) layout keeps the two-column composition below.
+	if m.overviewLayout != nil {
+		return m.renderOverviewCustom()
 	}
 	s := m.snap
 	var L []string
@@ -284,6 +291,8 @@ func (m *model) keyHints() string {
 		return "j/k select · Enter/l explore (du) · " + base
 	case tabNetwork:
 		return "j/k select · " + base
+	case tabOverview:
+		return "o customise · " + base
 	}
 	return base
 }

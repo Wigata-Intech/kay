@@ -30,6 +30,11 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		return keyResult{}
 	}
 
+	if m.layoutEdit != nil {
+		m.handleLayoutEditKey(ev)
+		return keyResult{}
+	}
+
 	if m.confirm != nil {
 		if ev.Rune == 'y' || ev.Rune == 'Y' {
 			m.status = m.confirm.run()
@@ -47,6 +52,8 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 	}
 
 	switch m.tab {
+	case tabOverview:
+		m.overviewAction(ev)
 	case tabProcesses:
 		m.procAction(ev)
 	case tabDocker:
@@ -55,6 +62,13 @@ func (m *model) handleKey(ev tui.Event) keyResult {
 		m.diskAction(ev)
 	}
 	return keyResult{}
+}
+
+// overviewAction opens the panel-layout editor when 'o' is pressed.
+func (m *model) overviewAction(ev tui.Event) {
+	if ev.Rune == 'o' {
+		m.openLayoutEditor()
+	}
 }
 
 // diskAction opens the du drill-down when Enter is pressed on a mount.

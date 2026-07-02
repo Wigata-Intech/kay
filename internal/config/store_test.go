@@ -182,3 +182,83 @@ func TestKeyTypeValues(t *testing.T) {
 		t.Errorf("KeyRSA = %q", config.KeyRSA)
 	}
 }
+
+// TestSaveStampsVersion checks that saving upgrades a store to the current schema
+// version without disturbing keys/servers.
+func TestSaveStampsVersion(t *testing.T) {
+	dir := t.TempDir()
+	st, err := config.LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if st.Version != 0 {
+		t.Fatalf("fresh store version = %d, want 0", st.Version)
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if st.Version != config.CurrentVersion {
+		t.Errorf("after save version = %d, want %d", st.Version, config.CurrentVersion)
+	}
+}
+
+// TestLegacyFileLoadsWithoutMigration loads a pre-version config file (no version,
+// no ui) and confirms it reads cleanly with defaults, then upgrades on save.
+func TestLegacyFileLoadsWithoutMigration(t *testing.T) {
+	dir := t.TempDir()
+	legacy := `{"keys":[],"servers":[{"alias":"a","host":"h","port":22,"user":"u","keyName":"k"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+	st, err := config.LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("load legacy: %v", err)
+	}
+	if st.Version != 0 {
+		t.Errorf("legacy version = %d, want 0", st.Version)
+	}
+	if len(st.Servers) != 1 {
+		t.Fatalf("legacy servers = %d, want 1", len(st.Servers))
+	}
+	if st.OverviewPanels() != nil {
+		t.Errorf("legacy OverviewPanels() = %v, want nil (default)", st.OverviewPanels())
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if st.Version != config.CurrentVersion {
+		t.Errorf("upgraded version = %d, want %d", st.Version, config.CurrentVersion)
+	}
+}
+
+// TestOverviewPanelsRoundTrip persists a customised Overview layout and reads it
+// back.
+func TestOverviewPanelsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := config.LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if st.OverviewPanels() != nil {
+		t.Fatalf("fresh OverviewPanels() = %v, want nil", st.OverviewPanels())
+	}
+	want := []config.PanelPref{{Name: "docker"}, {Name: "system", Hidden: true}, {Name: "procs"}}
+	st.SetOverviewPanels(want)
+	if err := st.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	st2, err := config.LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got := st2.OverviewPanels()
+	if len(got) != len(want) {
+		t.Fatalf("panels len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("panel %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
