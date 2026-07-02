@@ -36,18 +36,29 @@ type Container struct {
 
 // Disk is usage for one mounted filesystem.
 type Disk struct {
-	Filesystem string
-	Mount      string
-	TotalBytes uint64
-	UsedBytes  uint64
+	Filesystem  string
+	Mount       string
+	TotalBytes  uint64
+	UsedBytes   uint64
+	InodesTotal uint64
+	InodesUsed  uint64
 }
 
-// UsedPercent returns disk utilisation 0..100.
+// UsedPercent returns disk space utilisation 0..100.
 func (d Disk) UsedPercent() float64 {
 	if d.TotalBytes == 0 {
 		return 0
 	}
 	return float64(d.UsedBytes) / float64(d.TotalBytes) * 100
+}
+
+// InodesPercent returns inode utilisation 0..100 (0 when unknown). A filesystem
+// can be "full" on inodes with free space, so this is a distinct signal.
+func (d Disk) InodesPercent() float64 {
+	if d.InodesTotal == 0 {
+		return 0
+	}
+	return float64(d.InodesUsed) / float64(d.InodesTotal) * 100
 }
 
 // Snapshot is a single point-in-time reading.
@@ -56,17 +67,26 @@ type Snapshot struct {
 	UptimeSec      float64
 	NumCPU         int
 	CPUPercent     float64
+	PerCPU         []float64 // per-core utilisation 0..100, in core order
 	Load1          float64
 	Load5          float64
 	Load15         float64
 	MemTotalKB     uint64
 	MemAvailableKB uint64
 	MemUsedPercent float64
+	SwapTotalKB    uint64
+	SwapFreeKB     uint64
+	CachedKB       uint64
 	Net            []NetIface
 	Procs          []Proc
 	Disks          []Disk
 	Docker         []Container
 	DockerPresent  bool
+	TCPInUse       int      // established/active TCP sockets
+	TCPTimeWait    int      // sockets in TIME_WAIT
+	FailedUnits    []string // failed systemd units (empty on non-systemd hosts)
+	Kernel         string   // e.g. "Linux 6.1.0-21-amd64"
+	OSName         string   // e.g. "Ubuntu 24.04.1 LTS"
 }
 
 // RootDisk returns the filesystem mounted at "/", or the largest one.
@@ -90,14 +110,15 @@ func (s Snapshot) RootDisk() (Disk, bool) {
 const remoteScript = `
 echo '@@HOST'; hostname
 echo '@@UPTIME'; cat /proc/uptime
-echo '@@CPU1'; head -1 /proc/stat
+echo '@@CPU1'; grep '^cpu' /proc/stat
 sleep 0.25
-echo '@@CPU2'; head -1 /proc/stat
-echo '@@MEM'; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo
+echo '@@CPU2'; grep '^cpu' /proc/stat
+echo '@@MEM'; grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree|Cached):' /proc/meminfo
 echo '@@LOAD'; cat /proc/loadavg
 echo '@@NCPU'; nproc
 echo '@@NET'; cat /proc/net/dev
 echo '@@DISK'; df -P -B1 -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $1"|"$2"|"$3"|"$6}'
+echo '@@INODES'; df -Pi -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | awk 'NR>1{print $6"|"$2"|"$3}'
 echo '@@PROC'
 if command -v top >/dev/null 2>&1; then
   top -bn1 -w 512 2>/dev/null | awk 'p&&$1~/^[0-9]+$/{c=$12;for(i=13;i<=NF;i++)c=c" "$i;print $1"|"$9"|"$10"|"c} /^[[:space:]]*PID/{p=1}' | head -20
@@ -105,6 +126,9 @@ else
   ps -eo pid,pcpu,pmem,comm --sort=-pcpu --no-headers 2>/dev/null | awk '{print $1"|"$2"|"$3"|"$4}' | head -20
 fi
 echo '@@DOCKER'; if command -v docker >/dev/null 2>&1; then echo PRESENT; docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null; else echo ABSENT; fi
+echo '@@CONN'; cat /proc/net/sockstat 2>/dev/null
+echo '@@SVC'; if command -v systemctl >/dev/null 2>&1; then systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}'; fi
+echo '@@OS'; uname -sr; (. /etc/os-release 2>/dev/null; printf '%s\n' "${PRETTY_NAME:-}")
 echo '@@END'
 `
 
@@ -130,17 +154,63 @@ func Parse(out string) (Snapshot, error) {
 	if s.NumCPU == 0 {
 		s.NumCPU = 1
 	}
-	s.CPUPercent = cpuPercent(sec["CPU1"], sec["CPU2"])
+	s.CPUPercent, s.PerCPU = cpuAll(sec["CPU1"], sec["CPU2"])
 	s.Load1, s.Load5, s.Load15 = parseLoad(sec["LOAD"])
-	s.MemTotalKB, s.MemAvailableKB = parseMem(sec["MEM"])
+	s.MemTotalKB, s.MemAvailableKB, s.SwapTotalKB, s.SwapFreeKB, s.CachedKB = parseMem(sec["MEM"])
 	if s.MemTotalKB > 0 {
 		s.MemUsedPercent = float64(s.MemTotalKB-s.MemAvailableKB) / float64(s.MemTotalKB) * 100
 	}
 	s.Net = parseNet(sec["NET"])
 	s.Disks = parseDisk(sec["DISK"])
+	mergeInodes(s.Disks, sec["INODES"])
 	s.Procs = parseProcs(sec["PROC"])
 	s.Docker, s.DockerPresent = parseDocker(sec["DOCKER"])
+	s.TCPInUse, s.TCPTimeWait = parseSockstat(sec["CONN"])
+	s.FailedUnits = parseFailed(sec["SVC"])
+	s.Kernel, s.OSName = parseOS(sec["OS"])
 	return s, nil
+}
+
+// parseSockstat pulls TCP in-use and time-wait counts from /proc/net/sockstat.
+func parseSockstat(s string) (inuse, tw int) {
+	for _, line := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(line, "TCP:") {
+			continue
+		}
+		f := strings.Fields(line)
+		for i := 0; i+1 < len(f); i++ {
+			switch f[i] {
+			case "inuse":
+				inuse, _ = strconv.Atoi(f[i+1])
+			case "tw":
+				tw, _ = strconv.Atoi(f[i+1])
+			}
+		}
+	}
+	return
+}
+
+// parseFailed returns the failed systemd unit names (one per line).
+func parseFailed(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if u := strings.TrimSpace(line); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// parseOS reads the kernel (line 1: `uname -sr`) and distro pretty name (line 2).
+func parseOS(s string) (kernel, name string) {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > 0 {
+		kernel = strings.TrimSpace(lines[0])
+	}
+	if len(lines) > 1 {
+		name = strings.TrimSpace(lines[1])
+	}
+	return
 }
 
 func split(out string) map[string]string {
@@ -166,10 +236,14 @@ func split(out string) map[string]string {
 	return sec
 }
 
-func cpuStat(line string) (total, idle uint64) {
+type cpuTimes struct{ total, idle uint64 }
+
+// cpuTimesFrom parses one "cpu…" line from /proc/stat into total and idle jiffies
+// (idle = idle + iowait). Returns ok=false for non-cpu or malformed lines.
+func cpuTimesFrom(line string) (cpuTimes, bool) {
 	f := strings.Fields(line)
-	if len(f) < 5 || f[0] != "cpu" {
-		return 0, 0
+	if len(f) < 5 || !strings.HasPrefix(f[0], "cpu") {
+		return cpuTimes{}, false
 	}
 	var vals []uint64
 	for _, x := range f[1:] {
@@ -179,26 +253,56 @@ func cpuStat(line string) (total, idle uint64) {
 		}
 		vals = append(vals, v)
 	}
+	var t cpuTimes
 	for _, v := range vals {
-		total += v
+		t.total += v
 	}
 	if len(vals) >= 5 {
-		idle = vals[3] + vals[4]
+		t.idle = vals[3] + vals[4]
 	} else if len(vals) >= 4 {
-		idle = vals[3]
+		t.idle = vals[3]
 	}
-	return total, idle
+	return t, true
 }
 
-func cpuPercent(a, b string) float64 {
-	t1, i1 := cpuStat(strings.TrimSpace(a))
-	t2, i2 := cpuStat(strings.TrimSpace(b))
-	dt := float64(t2) - float64(t1)
-	di := float64(i2) - float64(i1)
+// cpuSample splits a @@CPU section into the aggregate ("cpu") sample and the
+// per-core ("cpuN") samples, in core order.
+func cpuSample(section string) (agg cpuTimes, cores []cpuTimes) {
+	for _, line := range strings.Split(section, "\n") {
+		line = strings.TrimSpace(line)
+		t, ok := cpuTimesFrom(line)
+		if !ok {
+			continue
+		}
+		if strings.Fields(line)[0] == "cpu" {
+			agg = t
+		} else {
+			cores = append(cores, t)
+		}
+	}
+	return
+}
+
+// cpuBusy derives a utilisation percentage from two samples of one cpu line.
+func cpuBusy(a, b cpuTimes) float64 {
+	dt := float64(b.total) - float64(a.total)
+	di := float64(b.idle) - float64(a.idle)
 	if dt <= 0 {
 		return 0
 	}
 	return clampPct((dt - di) / dt * 100)
+}
+
+// cpuAll computes aggregate and per-core utilisation from two @@CPU samples.
+func cpuAll(a, b string) (agg float64, per []float64) {
+	a1, c1 := cpuSample(a)
+	a2, c2 := cpuSample(b)
+	agg = cpuBusy(a1, a2)
+	n := min(len(c1), len(c2))
+	for i := 0; i < n; i++ {
+		per = append(per, cpuBusy(c1[i], c2[i]))
+	}
+	return agg, per
 }
 
 func clampPct(p float64) float64 {
@@ -221,7 +325,7 @@ func parseLoad(s string) (l1, l5, l15 float64) {
 	return
 }
 
-func parseMem(s string) (total, avail uint64) {
+func parseMem(s string) (total, avail, swapTotal, swapFree, cached uint64) {
 	for _, line := range strings.Split(s, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
@@ -233,9 +337,35 @@ func parseMem(s string) (total, avail uint64) {
 			total = v
 		case "MemAvailable:":
 			avail = v
+		case "SwapTotal:":
+			swapTotal = v
+		case "SwapFree:":
+			swapFree = v
+		case "Cached:":
+			cached = v
 		}
 	}
 	return
+}
+
+// mergeInodes fills each disk's inode counts from the @@INODES section
+// (mount|total|used), matching by mount point.
+func mergeInodes(disks []Disk, section string) {
+	in := map[string][2]uint64{}
+	for _, line := range strings.Split(section, "\n") {
+		parts := strings.Split(strings.TrimSpace(line), "|")
+		if len(parts) != 3 {
+			continue
+		}
+		total, _ := strconv.ParseUint(parts[1], 10, 64)
+		used, _ := strconv.ParseUint(parts[2], 10, 64)
+		in[parts[0]] = [2]uint64{total, used}
+	}
+	for i := range disks {
+		if v, ok := in[disks[i].Mount]; ok {
+			disks[i].InodesTotal, disks[i].InodesUsed = v[0], v[1]
+		}
+	}
 }
 
 func parseNet(s string) []NetIface {

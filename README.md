@@ -13,7 +13,7 @@ A small, single-binary CLI to manage a fleet of Linux servers over SSH:
 generate keys, register servers, install keys, run commands, and watch a
 refreshing metrics dashboard — for one host or your whole fleet.
 
-![kay dashboard demo](docs/demo.gif)
+![kay dashboard demo](assets/demo.gif)
 
 Built with the Go standard library plus the `golang.org/x` `crypto`, `term`, and
 `sys` packages (the only third-party dependencies). Design: KISS, DRY —
@@ -119,7 +119,7 @@ never pollutes your scrollback and restores your previous view on exit.
 
 ```
 Tabs    : Tab / Shift-Tab · [ / ] · H / L · or 1-5   → Overview · Processes · Docker · Network · Disk
-Global  : r refresh now · +/- change interval · q quit
+Global  : r refresh now · +/- change interval · ? help (full keymap) · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
 Process : s cycle sort (CPU/MEM/PID/name) · x SIGTERM · X SIGKILL   (asks y/N first)
 Docker  : l logs · t stats (top by CPU/MEM) · R restart · x stop   (restart/stop ask y/N first)
@@ -127,13 +127,19 @@ Stats   : c sort CPU · m sort MEM · r reload · j/k select · Esc back
 Disk    : Enter/l explore a mount (du) — dirs & files by size; . toggles hidden;
           j/k select · Enter/l/→ open dir · h/←/⌫ up · Esc back  (opening a file: notice)
 Detail  : j/k ↑↓ scroll · h/l ←→ pan · g/G ends · / search (n/N next) · Esc/q back
+Overview: o customise panels — j/k select · J/K move · space hide · w save · Esc cancel
 ```
 
 Keys are vim-friendly throughout: `h/j/k/l` move, `g/G` jump to ends, `H/L`
 switch tabs, and `Esc`/`q` back out of any overlay.
 
-The Overview shows CPU/memory sparkline history; on wide terminals it splits
-into system gauges (left) and top processes (right).
+The Overview is a **responsive grid** of panels — System (CPU + per-core + load),
+Memory (RAM + swap + cached), Top processes, Disk (space + inodes), Network,
+Docker, Connections, and Services (failed units) — flowing into one, two, or
+three columns as the terminal widens, with CPU/memory sparkline history. Press
+**`o`** to customise it: reorder panels with `J`/`K` and hide them with `space`,
+then `w` to save. Your layout persists in `config.json` and applies to every
+host's dashboard.
 
 Navigation is vim-friendly (`j/k`, `g/G`, `h/l`, `Ctrl-U/Ctrl-D`). The
 inspect/logs overlay is a scrollable, horizontally-pannable pager with `/`
@@ -289,6 +295,7 @@ standard tools.
 | Per-pane titles on two-column Overview | ✅ Done | System \| Top processes |
 | Multi-server fleet overview (one row per host) | ✅ Done | `kay fleet` — concurrent multi-host live table |
 | Persistent, self-healing fleet SSH connections | ✅ Done | v0.2 — one long-lived connection per host (`sshx.Pool`/`Managed`); reuse, backoff+jitter, dial cap, zero-handshake drill-in |
+| Customisable Overview (reorder / hide panels) | ✅ Done | v0.2 — `o` in the Overview tab; layout persists in `config.json` (`ui` section, schema `version`) |
 | Richer Overview (docker health counts, sparklines) | ✅ Done | More than gauges |
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
 | CI quality gates (lint · gosec · govulncheck) | ✅ Done | golangci-lint 0 issues + gosec + govulncheck in CI and `make ci` |

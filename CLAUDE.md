@@ -134,7 +134,8 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
 
 - `README.md` — user docs · `ARCHITECTURE.md` — layering · `SECURITY.md` — model
 - `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` — contributor rules
-- `docs/technical-design/` — design docs · `docs/demo.tape` / `blur.sh` — demo pipeline
+- `assets/` — demo pipeline (`demo.tape` / `blur.sh` → `demo.gif`); technical
+  design docs live in the Camelot vault (`../../docs/technical-design/`)
 - `.github/workflows/` — `ci.yml` (gates) · `codeql.yml` (code scanning) · `release.yml` (GoReleaser)
 - `Makefile` — all dev commands · `.goreleaser.yaml` — release build
 

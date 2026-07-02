@@ -9,27 +9,6 @@ import (
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
-func TestSparkline(t *testing.T) {
-	noColor(t)
-	t.Run("empty-collecting", func(t *testing.T) {
-		if got := sparkline(nil, 8); !strings.Contains(got, "collecting") {
-			t.Errorf("sparkline(nil) = %q, want collecting note", got)
-		}
-	})
-	t.Run("renders-blocks", func(t *testing.T) {
-		got := sparkline([]float64{0, 50, 100}, 8)
-		if got != "▁▅█" {
-			t.Errorf("sparkline = %q, want %q", got, "▁▅█")
-		}
-	})
-	t.Run("clamps-and-truncates-to-width", func(t *testing.T) {
-		got := sparkline([]float64{-10, 200, 200, 200}, 2)
-		if []rune(got)[0] != '█' || len([]rune(got)) != 2 {
-			t.Errorf("sparkline clamp/trunc = %q", got)
-		}
-	})
-}
-
 func TestOverviewDocker(t *testing.T) {
 	noColor(t)
 	tests := []struct {
@@ -92,12 +71,39 @@ func TestOverviewProcs(t *testing.T) {
 func TestOverviewSystem(t *testing.T) {
 	noColor(t)
 	m := newModel()
-	out := m.overviewSystem(m.snap)
-	joined := strings.Join(out, "\n")
-	for _, want := range []string{"CPU", "MEM", "DISK", "LOAD", "cpu", "mem"} {
+	joined := strings.Join(m.overviewSystem(m.snap), "\n")
+	for _, want := range []string{"CPU", "LOAD", "cpu"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("overviewSystem missing %q in:\n%s", want, joined)
 		}
+	}
+}
+
+func TestHelpOverlay(t *testing.T) {
+	noColor(t)
+	m := newModel()
+	m.handleKey(tui.Event{Rune: '?'})
+	if !m.help {
+		t.Fatal("? should open the help overlay")
+	}
+	m.handleKey(tui.Event{Rune: 'j'})
+	if m.help {
+		t.Error("any key should close the help overlay")
+	}
+	m.help = true
+	if out := strings.Join(m.render(100, 40), "\n"); !strings.Contains(out, "Keybindings") {
+		t.Errorf("help overlay not rendered:\n%s", out)
+	}
+}
+
+func TestOverviewMemoryAndDisk(t *testing.T) {
+	noColor(t)
+	m := newModel()
+	if got := strings.Join(m.overviewMemory(m.snap), "\n"); !strings.Contains(got, "MEM") || !strings.Contains(got, "mem") {
+		t.Errorf("overviewMemory missing MEM/mem trend:\n%s", got)
+	}
+	if got := strings.Join(m.overviewDisk(m.snap), "\n"); !strings.Contains(got, "DISK") {
+		t.Errorf("overviewDisk missing DISK:\n%s", got)
 	}
 }
 

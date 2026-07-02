@@ -6,7 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-02
+
+A major dashboard and fleet release. Fleet now keeps one persistent, self-healing
+SSH connection per host; the Overview is a responsive, customisable multi-column
+grid with eight panels and richer metrics (per-core CPU, swap, inodes,
+connections, failed services, kernel/OS); the `tui` toolkit gained reusable,
+extractable widgets; and a `?` help overlay plus fleet drill-in round out the UX.
+
+### Changed
+
+- **Responsive Overview** — the Overview now flows its panels into one, two, or
+  three columns depending on terminal width (≥105 cols → two, ≥160 → three),
+  filling the width with a divider between columns, laid out as an ordered grid
+  (row-major, honouring your panel order), and using width up to 200 cols instead
+  of the old 100-col cap. Customised layouts keep the multi-column rendering
+  (previously a custom layout dropped to a single stacked column).
+- **`internal/tui` gained reusable widgets** — `Bar`, `Gauge`, `Sparkline`,
+  `Columns`, `ColumnCount`, `HumanBytes`, `HumanDuration` moved out of the
+  dashboard so the toolkit stays UI-agnostic and reusable (domain colouring stays
+  in the dashboard).
+
+### Fixed
+
+- **`kay version` on local builds** — when not built via GoReleaser it now falls
+  back to the VCS revision/date Go embeds (`kay dev (rev abc1234, <date>, dirty)`)
+  instead of a bare `dev`.
+
 ### Added
+
+- **`?` help overlay** — press `?` in the dashboard or `kay fleet` for a
+  full, context-grouped key-binding reference; any key closes it. Footers now
+  advertise `? help`.
+- **Better command help** — every subcommand accepts `-h`/`--help` and prints its
+  flags cleanly (exit 0), and `kay` with no arguments now leads with examples.
+- **More Overview panels & metrics** — the batched metrics script (still one SSH
+  round-trip) now also collects **per-core CPU**, **swap** and **cached** memory,
+  **inode usage** per filesystem, **TCP connection counts** (`/proc/net/sockstat`),
+  **failed systemd units**, and the **kernel / OS release**. The Overview gains
+  dedicated **Memory** (RAM + swap + cached), **Disk** (space + inodes),
+  **Connections** (active / time-wait), and **Services** (failed units) panels; the
+  System panel shows a per-core level strip (`core ▇▂▅▂`) and the header shows the
+  OS. All eight panels are reorderable/hideable via the `o` editor and now lay out
+  as an ordered grid (row-major, honouring your panel order) that fills the width
+  with a divider between columns.
+- **Customisable Overview** — press `o` in the dashboard's Overview tab to reorder
+  its panels (System, Top processes, Network, Docker) and hide the ones you don't
+  want: `j/k` select, `J/K` move, `space` toggle, `w` save, `Esc` cancel. The
+  layout persists in `config.json` under a new `ui` section and applies to every
+  host. The config file gains a `version` field; older files (no version) load
+  unchanged and are upgraded in place on the next save — no migration step, no
+  data loss.
 
 - **Fleet drill-in** — press Enter on a host in `kay fleet` to open its full
   dashboard, and Esc/`q` to return to the overview; Ctrl-C (or SIGTERM) exits the
@@ -186,7 +236,8 @@ Initial release.
 - Public-key authentication only (password used solely for assisted install);
   no telemetry.
 
-[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Wigata-Intech/kay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wigata-Intech/kay/releases/tag/v0.1.0

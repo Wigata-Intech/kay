@@ -121,3 +121,44 @@ func TestSetColorMode(t *testing.T) {
 		}
 	})
 }
+
+func TestHumanBytes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   float64
+		want string
+	}{
+		{"bytes", 512, "512 B"},
+		{"kib", 1024, "1.0 KB"},
+		{"mib", 1024 * 1024, "1.0 MB"},
+		{"gib", 1024 * 1024 * 1024, "1.0 GB"},
+		{"zero", 0, "0 B"},
+		{"exabyte", 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 2, "2.0 EB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tui.HumanBytes(tt.in); got != tt.want {
+				t.Errorf("HumanBytes(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHumanDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		sec  float64
+		want string
+	}{
+		{"hours-minutes", 3660, "1h 1m"},
+		{"days", 90000, "1d 1h 0m"},
+		{"zero", 0, "0h 0m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tui.HumanDuration(tt.sec); got != tt.want {
+				t.Errorf("HumanDuration(%v) = %q, want %q", tt.sec, got, tt.want)
+			}
+		})
+	}
+}

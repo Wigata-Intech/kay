@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -52,4 +54,33 @@ func ClampAll(lines []string, w, h int) []string {
 func FirstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line
+}
+
+// HumanBytes formats a byte count with a binary (1024) unit suffix.
+func HumanBytes(b float64) string {
+	const unit = 1024.0
+	if b < unit {
+		return fmt.Sprintf("%.0f B", b)
+	}
+	v := b / unit
+	for _, u := range []string{"K", "M", "G", "T", "P"} {
+		if v < unit {
+			return fmt.Sprintf("%.1f %sB", v, u)
+		}
+		v /= unit
+	}
+	return fmt.Sprintf("%.1f EB", v)
+}
+
+// HumanDuration formats a number of seconds as "Nd Nh Nm" (dropping the day
+// field under 24h).
+func HumanDuration(sec float64) string {
+	d := time.Duration(sec) * time.Second
+	days := int(d.Hours()) / 24
+	hh := int(d.Hours()) % 24
+	mm := int(d.Minutes()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm", days, hh, mm)
+	}
+	return fmt.Sprintf("%dh %dm", hh, mm)
 }

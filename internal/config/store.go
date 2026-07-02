@@ -45,13 +45,48 @@ func (s Server) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
 
+// CurrentVersion is the schema version stamped on save. Version 0 (absent) is the
+// original v0.1 layout, which had no version field; it is read without migration.
+const CurrentVersion = 1
+
+// PanelPref is one Overview panel's saved preference: its identifier plus whether
+// the user hid it. Order in the slice is the display order.
+type PanelPref struct {
+	Name   string `json:"name"`
+	Hidden bool   `json:"hidden,omitempty"`
+}
+
+// UISettings holds user interface preferences that persist across sessions.
+type UISettings struct {
+	Overview []PanelPref `json:"overview,omitempty"` // Overview panel order + visibility
+}
+
 // Store is the whole persisted state.
 type Store struct {
-	Keys    []Key    `json:"keys"`
-	Servers []Server `json:"servers"`
+	Version int         `json:"version"`
+	Keys    []Key       `json:"keys"`
+	Servers []Server    `json:"servers"`
+	UI      *UISettings `json:"ui,omitempty"`
 
 	dir  string // resolved config dir (not serialised)
 	path string // resolved config.json path (not serialised)
+}
+
+// OverviewPanels returns the saved Overview panel layout, or nil when the user
+// has not customised it (callers then fall back to their built-in default order).
+func (s *Store) OverviewPanels() []PanelPref {
+	if s.UI == nil {
+		return nil
+	}
+	return s.UI.Overview
+}
+
+// SetOverviewPanels records a customised Overview layout.
+func (s *Store) SetOverviewPanels(panels []PanelPref) {
+	if s.UI == nil {
+		s.UI = &UISettings{}
+	}
+	s.UI.Overview = panels
 }
 
 // Dir returns the resolved configuration directory.
@@ -104,8 +139,11 @@ func LoadFrom(dir string) (*Store, error) {
 	return s, nil
 }
 
-// Save atomically writes the store to disk with restrictive permissions.
+// Save atomically writes the store to disk with restrictive permissions. It
+// stamps the current schema version; older files (version 0) are upgraded in
+// place on the next save without touching existing keys or servers.
 func (s *Store) Save() error {
+	s.Version = CurrentVersion
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err

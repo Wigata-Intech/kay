@@ -5,9 +5,11 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -69,25 +71,68 @@ func main() {
 		os.Exit(1)
 	}
 	if err := h(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return // `-h`/`--help` on a subcommand: flag already printed its usage
+		}
 		fmt.Fprintln(os.Stderr, "kay: "+err.Error())
 		os.Exit(1)
 	}
 }
 
-// cmdVersion prints the build version with optional commit/date, set via ldflags.
+// cmdVersion prints the build version with optional commit/date. Release builds
+// set these via ldflags; for local `go build`/`make build` (no ldflags) it falls
+// back to the VCS stamp Go embeds in the binary, so `kay version` is never bare.
 func cmdVersion() {
-	v := version
-	var extra []string
-	if commit != "" {
-		extra = append(extra, commit)
+	v, c, d := version, commit, date
+	if c == "" || d == "" {
+		if rev, when, ok := vcsStamp(); ok {
+			if c == "" {
+				c = rev
+			}
+			if d == "" {
+				d = when
+			}
+		}
 	}
-	if date != "" {
-		extra = append(extra, date)
+	var extra []string
+	if c != "" {
+		extra = append(extra, c)
+	}
+	if d != "" {
+		extra = append(extra, d)
 	}
 	if len(extra) > 0 {
 		v += " (" + strings.Join(extra, ", ") + ")"
 	}
 	fmt.Println("kay " + v)
+}
+
+// vcsStamp reads the VCS revision/time Go embeds during `go build` in a git
+// checkout, used when ldflags didn't supply commit/date. The revision is
+// shortened and marked "-dirty" when the working tree had uncommitted changes.
+func vcsStamp() (rev, when string, ok bool) {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", "", false
+	}
+	var dirty bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+		case "vcs.time":
+			when = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if dirty && rev != "" {
+		rev += "-dirty"
+	}
+	return rev, when, rev != "" || when != ""
 }
 
 func usage() {
@@ -107,6 +152,15 @@ Usage:
   kay fleet [--interval 5s] [--insecure] [--anonymize] [--color auto|always|never]
   kay ls
   kay version
+
+Examples:
+  kay key gen --name laptop                         generate a key
+  kay server add --alias web --host 10.0.0.1 --user ubuntu --key laptop
+  kay install --alias web --push                    install the key over a password login
+  kay dashboard --alias web                         watch one host (press ? for keys)
+  kay fleet                                          watch every host; Enter drills in
+
+Run any subcommand with -h for its flags.
 `)
 }
 
@@ -424,14 +478,26 @@ func cmdDashboard(args []string) error {
 		return err
 	}
 	defer client.Close()
+	panels, saveLayout := overviewLayoutOpts(st)
 	opts := dashboard.Options{
-		Interval:  *interval,
-		Color:     *color,
-		ReadOnly:  *readonly,
-		Anonymize: *anon || os.Getenv("KAY_DEMO") != "",
-		Redial:    func() (dashboard.Client, error) { return dial(st, srv, *insecure) },
+		Interval:   *interval,
+		Color:      *color,
+		ReadOnly:   *readonly,
+		Anonymize:  *anon || os.Getenv("KAY_DEMO") != "",
+		Redial:     func() (dashboard.Client, error) { return dial(st, srv, *insecure) },
+		Overview:   panels,
+		SaveLayout: saveLayout,
 	}
 	return dashboard.Run(client, *srv, opts)
+}
+
+// overviewLayoutOpts loads the saved Overview layout and returns a saver that
+// persists edits back to the store.
+func overviewLayoutOpts(st *config.Store) (panels []config.PanelPref, save func([]config.PanelPref) error) {
+	return st.OverviewPanels(), func(p []config.PanelPref) error {
+		st.SetOverviewPanels(p)
+		return st.Save()
+	}
 }
 
 // ---- fleet ----
@@ -467,7 +533,7 @@ func cmdFleet(args []string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fleet.Run(hosts, fopts)
 	}
-	return fleetDrill(hosts, fopts, *readonly)
+	return fleetDrill(st, hosts, fopts, *readonly)
 }
 
 // fleetDrill runs the interactive fleet overview with drill-in: it owns a single
@@ -475,7 +541,7 @@ func cmdFleet(args []string) error {
 // Enter on a host hands the terminal to that host's dashboard and back with no
 // flicker, no competing stdin readers, and no second SSH handshake — the
 // dashboard reuses the connection the fleet already established.
-func fleetDrill(hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
+func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 	tui.SetColorMode(fopts.Color)
 	scr, err := tui.NewScreen()
 	if err != nil {
@@ -507,11 +573,14 @@ func fleetDrill(hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 			return nil // user quit the fleet
 		}
 		srv := sel.Host.Server
+		panels, saveLayout := overviewLayoutOpts(st)
 		dopts := dashboard.Options{
-			Interval:  fopts.Interval,
-			Color:     fopts.Color,
-			ReadOnly:  readOnly,
-			Anonymize: fopts.Anonymize,
+			Interval:   fopts.Interval,
+			Color:      fopts.Color,
+			ReadOnly:   readOnly,
+			Anonymize:  fopts.Anonymize,
+			Overview:   panels,
+			SaveLayout: saveLayout,
 			// No Redial: the reused connection is pool-managed and self-heals, so
 			// the dashboard just retries its metrics over the same seam.
 		}

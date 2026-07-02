@@ -2,33 +2,10 @@
 package dashboard
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
-
-func TestHumanBytes(t *testing.T) {
-	tests := []struct {
-		name string
-		in   float64
-		want string
-	}{
-		{"bytes", 512, "512 B"},
-		{"kib", 1024, "1.0 KB"},
-		{"mib", 1024 * 1024, "1.0 MB"},
-		{"gib", 1024 * 1024 * 1024, "1.0 GB"},
-		{"zero", 0, "0 B"},
-		{"exabyte", 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 2, "2.0 EB"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := humanBytes(tt.in); got != tt.want {
-				t.Errorf("humanBytes(%v) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestHumanKB(t *testing.T) {
 	if got := humanKB(1024); got != "1.0 MB" {
@@ -36,59 +13,6 @@ func TestHumanKB(t *testing.T) {
 	}
 	if got := humanKB(0); got != "0 B" {
 		t.Errorf("humanKB(0) = %q, want %q", got, "0 B")
-	}
-}
-
-func TestHumanDuration(t *testing.T) {
-	tests := []struct {
-		name string
-		sec  float64
-		want string
-	}{
-		{"hours-minutes", 3660, "1h 1m"},
-		{"days", 90000, "1d 1h 0m"},
-		{"zero", 0, "0h 0m"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := humanDuration(tt.sec); got != tt.want {
-				t.Errorf("humanDuration(%v) = %q, want %q", tt.sec, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMakeBar(t *testing.T) {
-	noColor(t)
-	tests := []struct {
-		name  string
-		pct   float64
-		width int
-		want  string
-	}{
-		{"half", 50, 10, "[█████·····]"},
-		{"full", 100, 4, "[████]"},
-		{"empty", 0, 4, "[····]"},
-		{"negative-clamps-empty", -20, 4, "[····]"},
-		{"over-100-clamps-full", 150, 4, "[████]"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := makeBar(tt.pct, tt.width); got != tt.want {
-				t.Errorf("makeBar(%v,%d) = %q, want %q", tt.pct, tt.width, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGaugeLine(t *testing.T) {
-	noColor(t)
-	got := gaugeLine("CPU", 50, 10, "4 cores")
-	if !strings.Contains(got, "CPU") || !strings.Contains(got, "50%") || !strings.Contains(got, "4 cores") {
-		t.Errorf("gaugeLine missing parts: %q", got)
-	}
-	if !strings.Contains(got, "[█████·····]") {
-		t.Errorf("gaugeLine missing bar: %q", got)
 	}
 }
 

@@ -1,9 +1,7 @@
 package dashboard
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
@@ -35,26 +33,6 @@ func loadColor(load float64, ncpu int, s string) string {
 	}
 }
 
-func makeBar(pct float64, width int) string {
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 100 {
-		pct = 100
-	}
-	filled := int(pct/100*float64(width) + 0.5)
-	if filled > width {
-		filled = width
-	}
-	return "[" + tui.ThreshColor(strings.Repeat("█", filled), pct) +
-		tui.Dim(strings.Repeat("·", width-filled)) + "]"
-}
-
-func gaugeLine(label string, pct float64, width int, suffix string) string {
-	return fmt.Sprintf("%-4s %s %s  %s",
-		label, makeBar(pct, width), tui.ThreshColor(fmt.Sprintf("%3.0f%%", pct), pct), suffix)
-}
-
 func validID(s string) bool {
 	if s == "" {
 		return false
@@ -69,30 +47,5 @@ func validID(s string) bool {
 	return true
 }
 
-func humanBytes(b float64) string {
-	const unit = 1024.0
-	if b < unit {
-		return fmt.Sprintf("%.0f B", b)
-	}
-	v := b / unit
-	for _, u := range []string{"K", "M", "G", "T", "P"} {
-		if v < unit {
-			return fmt.Sprintf("%.1f %sB", v, u)
-		}
-		v /= unit
-	}
-	return fmt.Sprintf("%.1f EB", v)
-}
-
-func humanKB(kb uint64) string { return humanBytes(float64(kb) * 1024) }
-
-func humanDuration(sec float64) string {
-	d := time.Duration(sec) * time.Second
-	days := int(d.Hours()) / 24
-	hh := int(d.Hours()) % 24
-	mm := int(d.Minutes()) % 60
-	if days > 0 {
-		return fmt.Sprintf("%dd %dh %dm", days, hh, mm)
-	}
-	return fmt.Sprintf("%dh %dm", hh, mm)
-}
+// humanKB formats a KiB count via tui.HumanBytes.
+func humanKB(kb uint64) string { return tui.HumanBytes(float64(kb) * 1024) }

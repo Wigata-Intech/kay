@@ -37,7 +37,7 @@ func (m *model) overviewNet(max int) []string {
 		if i >= max {
 			break
 		}
-		out = append(out, fmt.Sprintf("NET  %s ↓ %10s/s  ↑ %10s/s", tui.Pad(e.ni.Name, 12), humanBytes(e.rx), humanBytes(e.tx)))
+		out = append(out, fmt.Sprintf("NET  %s ↓ %10s/s  ↑ %10s/s", tui.Pad(e.ni.Name, 12), tui.HumanBytes(e.rx), tui.HumanBytes(e.tx)))
 	}
 	if len(list) > max {
 		out = append(out, tui.Dim(fmt.Sprintf("     +%d more interfaces — see Network tab", len(list)-max)))
@@ -50,8 +50,8 @@ func (m *model) render(w, h int) []string {
 		return tooSmall(w, h)
 	}
 	cw := w
-	if cw > 100 {
-		cw = 100
+	if cw > 200 {
+		cw = 200 // sanity cap on ultra-wide terminals; the Overview uses columns to fill it
 	}
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
@@ -104,6 +104,8 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 		return m.overlayFrame("", []string{"", "  connecting…", ""}, dim("q quit"), cw, innerH, w, h), true
 	case m.notice != "":
 		return m.overlayFrame("Notice", []string{"", "  " + m.notice, ""}, dim("press any key to dismiss"), cw, innerH, w, h), true
+	case m.help:
+		return m.overlayFrame("Keybindings", tui.RenderHelp(helpSections()), dim("press any key to close"), cw, innerH, w, h), true
 	case m.detail != nil:
 		body := m.renderDetailBody(innerW, innerH)
 		return m.overlayFrame(m.detailTitle, body, m.detailFooter(cw), cw, innerH, w, h), true
@@ -113,6 +115,8 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 	case m.dockStats != nil:
 		title, body := m.renderDockStats(innerW, innerH)
 		return m.overlayFrame(title, body, dim("j/k select · c sort cpu · m sort mem · r reload · esc back"), cw, innerH, w, h), true
+	case m.layoutEdit != nil:
+		return m.overlayFrame("Customise Overview", m.renderLayoutEditor(), dim("j/k select · J/K move · space hide · w save · esc cancel"), cw, innerH, w, h), true
 	}
 	return nil, false
 }
@@ -122,13 +126,16 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 func (m *model) headerBar(w int) string {
 	up := "—"
 	if m.have {
-		up = humanDuration(m.snap.UptimeSec)
+		up = tui.HumanDuration(m.snap.UptimeSec)
 	}
 	alias, user, addr := m.srv.Alias, m.srv.User, m.srv.Addr()
 	if m.anon {
 		alias, user, addr = "server", "user", "demo.host"
 	}
 	left := fmt.Sprintf("kay · %s · %s@%s · up %s", alias, user, addr, up)
+	if m.snap.OSName != "" && !m.anon {
+		left += " · " + m.snap.OSName
+	}
 	right := fmt.Sprintf("%s · every %s", time.Now().Format("15:04:05"), m.interval)
 	gap := w - tui.VisibleWidth(left) - tui.VisibleWidth(right) - 1
 	if gap < 1 {
@@ -141,66 +148,88 @@ func (m *model) renderOverview(width int) []string {
 	if m.err != nil {
 		return []string{"", tui.Red("⚠ collection error: " + tui.FirstLine(m.err.Error())), "", tui.Dim("retrying on next tick…")}
 	}
-	s := m.snap
-	var L []string
-
-	// Wide terminals get a two-column top (system gauges | top processes);
-	// narrow ones stack the same content.
-	if width >= 88 {
-		left := append([]string{tui.Cyan("System")}, m.overviewSystem(s)...)
-		right := append([]string{tui.Cyan("Top processes")}, m.overviewProcs(s, 6)...)
-		L = append(L, tui.Join(left, right, 4)...)
-	} else {
-		L = append(L, m.overviewSystem(s)...)
-		L = append(L, "")
-		L = append(L, m.overviewProcs(s, 3)...)
+	// Build each visible panel as a block (title + body) in the user's order, then
+	// flow the blocks into as many columns as the width allows — one when narrow,
+	// up to three when very wide — so the layout is responsive and the panel order
+	// from the `o` editor is honoured in every column count.
+	var blocks [][]string
+	for _, p := range m.effectiveLayout() {
+		if p.Hidden {
+			continue
+		}
+		if b := m.renderPanel(p.Name); len(b) > 0 {
+			blocks = append(blocks, b)
+		}
 	}
-	L = append(L, "")
-	L = append(L, m.overviewNet(4)...) // busiest few; full list is on the Network tab
-	L = append(L, "")
-	L = append(L, m.overviewDocker(s))
-	return L
+	if len(blocks) == 0 {
+		return []string{"", tui.Dim("all panels hidden — press o to customise the Overview")}
+	}
+	return layoutPanels(blocks, width)
 }
 
+// overviewSystem is the CPU/load panel body: CPU gauge, per-core levels, load,
+// and the CPU trend sparkline.
 func (m *model) overviewSystem(s metrics.Snapshot) []string {
-	L := []string{
-		gaugeLine("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU)),
-		gaugeLine("MEM", s.MemUsedPercent, 18,
-			fmt.Sprintf("%s / %s", humanKB(s.MemTotalKB-s.MemAvailableKB), humanKB(s.MemTotalKB))),
-	}
-	if d, ok := s.RootDisk(); ok {
-		L = append(L, gaugeLine("DISK", d.UsedPercent(), 18,
-			fmt.Sprintf("%s (%s)", d.Mount, humanBytes(float64(d.TotalBytes)))))
+	L := []string{tui.Gauge("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU))}
+	if len(s.PerCPU) > 0 {
+		L = append(L, "core "+tui.SparkCells(s.PerCPU))
 	}
 	L = append(L, fmt.Sprintf("LOAD %s %.2f %.2f",
 		loadColor(s.Load1, s.NumCPU, fmt.Sprintf("%.2f", s.Load1)), s.Load5, s.Load15))
-	L = append(L, "cpu "+sparkline(m.cpuHist, 16))
-	L = append(L, "mem "+sparkline(m.memHist, 16))
+	L = append(L, "cpu  "+tui.Sparkline(m.cpuHist, 16))
 	return L
 }
 
-var sparkRunes = []rune("▁▂▃▄▅▆▇█")
+// overviewMemory is the memory panel body: RAM gauge, swap gauge (when present),
+// cached, and the memory trend sparkline.
+func (m *model) overviewMemory(s metrics.Snapshot) []string {
+	L := []string{tui.Gauge("MEM", s.MemUsedPercent, 18,
+		fmt.Sprintf("%s / %s", humanKB(s.MemTotalKB-s.MemAvailableKB), humanKB(s.MemTotalKB)))}
+	if s.SwapTotalKB > 0 {
+		swapPct := float64(s.SwapTotalKB-s.SwapFreeKB) / float64(s.SwapTotalKB) * 100
+		L = append(L, tui.Gauge("SWAP", swapPct, 18,
+			fmt.Sprintf("%s / %s", humanKB(s.SwapTotalKB-s.SwapFreeKB), humanKB(s.SwapTotalKB))))
+	}
+	if s.CachedKB > 0 {
+		L = append(L, tui.Dim(fmt.Sprintf("cached %s", humanKB(s.CachedKB))))
+	}
+	L = append(L, "mem  "+tui.Sparkline(m.memHist, 16))
+	return L
+}
 
-// sparkline renders recent values (0..100) as a compact block-character trend,
-// coloured by the latest value.
-func sparkline(v []float64, width int) string {
-	if len(v) == 0 {
-		return tui.Dim("(collecting…)")
+// overviewDisk is the disk panel body: the root filesystem's space gauge plus its
+// inode utilisation (inodes can exhaust with space free).
+func (m *model) overviewDisk(s metrics.Snapshot) []string {
+	d, ok := s.RootDisk()
+	if !ok {
+		return []string{tui.Dim("no filesystems")}
 	}
-	if len(v) > width {
-		v = v[len(v)-width:]
+	L := []string{tui.Gauge("DISK", d.UsedPercent(), 18,
+		fmt.Sprintf("%s (%s)", d.Mount, tui.HumanBytes(float64(d.TotalBytes))))}
+	if d.InodesTotal > 0 {
+		L = append(L, tui.Gauge("INOD", d.InodesPercent(), 18, "inodes"))
 	}
-	var b strings.Builder
-	for _, x := range v {
-		if x < 0 {
-			x = 0
+	return L
+}
+
+// overviewServices is the systemd panel body: an all-clear line, or the failed
+// unit count and the first few names.
+func (m *model) overviewServices(s metrics.Snapshot) []string {
+	if len(s.FailedUnits) == 0 {
+		return []string{tui.Green("no failed units")}
+	}
+	L := []string{tui.Red(fmt.Sprintf("%d failed", len(s.FailedUnits)))}
+	for i, u := range s.FailedUnits {
+		if i >= 3 {
+			L = append(L, tui.Dim(fmt.Sprintf("+%d more", len(s.FailedUnits)-3)))
+			break
 		}
-		if x > 100 {
-			x = 100
+		if m.anon {
+			u = fmt.Sprintf("unit-%d", i+1)
 		}
-		b.WriteRune(sparkRunes[int(x/100*float64(len(sparkRunes)-1)+0.5)])
+		L = append(L, "  "+u)
 	}
-	return tui.ThreshColor(b.String(), v[len(v)-1])
+	return L
 }
 
 func (m *model) overviewProcs(s metrics.Snapshot, n int) []string {
@@ -264,8 +293,36 @@ func (m *model) blockedReadOnly() bool {
 	return false
 }
 
+// helpSections is the full key-binding reference shown by the `?` overlay,
+// grouped by context.
+func helpSections() []tui.HelpSection {
+	return []tui.HelpSection{
+		{Title: "Global", Keys: [][2]string{
+			{"Tab / H / L / 1-5", "switch tabs"}, {"r", "refresh now"},
+			{"+ / -", "change interval"}, {"?", "this help"}, {"q", "quit / back"},
+		}},
+		{Title: "Lists (Processes/Docker/Network/Disk)", Keys: [][2]string{
+			{"j/k ↑↓", "select"}, {"g / G", "top / bottom"},
+			{"Ctrl-U / Ctrl-D", "page"}, {"Enter", "details / inspect"},
+		}},
+		{Title: "Overview", Keys: [][2]string{{"o", "customise panels (reorder / hide)"}}},
+		{Title: "Processes", Keys: [][2]string{
+			{"s", "cycle sort (CPU/MEM/PID/name)"}, {"x / X", "SIGTERM / SIGKILL (confirm)"},
+		}},
+		{Title: "Docker", Keys: [][2]string{
+			{"l", "logs"}, {"t", "stats (top)"}, {"R / x", "restart / stop (confirm)"},
+		}},
+		{Title: "Disk", Keys: [][2]string{
+			{"Enter / l", "explore mount (du)"}, {".", "toggle hidden"}, {"h / ⌫", "up a level"},
+		}},
+		{Title: "Detail / logs", Keys: [][2]string{
+			{"j/k h/l", "scroll / pan"}, {"/", "search (n/N next)"}, {"Esc / q", "back"},
+		}},
+	}
+}
+
 func (m *model) keyHints() string {
-	base := "Tab/H/L tabs · r refresh · +/- interval · q quit"
+	base := "Tab/H/L tabs · r refresh · +/- interval · ? help · q quit"
 	if m.readOnly {
 		base = tui.Yellow("[read-only]") + " " + base
 	}
@@ -284,6 +341,8 @@ func (m *model) keyHints() string {
 		return "j/k select · Enter/l explore (du) · " + base
 	case tabNetwork:
 		return "j/k select · " + base
+	case tabOverview:
+		return "o customise · " + base
 	}
 	return base
 }

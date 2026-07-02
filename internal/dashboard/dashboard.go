@@ -32,6 +32,12 @@ type Options struct {
 
 	// Redial, if set, is used to re-establish the connection after a failure.
 	Redial func() (Client, error)
+
+	// Overview is the saved Overview panel layout (nil = built-in default order).
+	Overview []config.PanelPref
+	// SaveLayout, if set, persists a customised Overview layout when the user
+	// saves it from the layout editor.
+	SaveLayout func([]config.PanelPref) error
 }
 
 var tabNames = []string{"Overview", "Processes", "Docker", "Network", "Disk"}
@@ -80,6 +86,11 @@ type model struct {
 	diskExpl    *diskExplorer  // non-nil while drilling into a mount with du
 	dockStats   *dockStatsView // non-nil while the docker-stats overlay is open
 	notice      string         // non-empty shows a dismissable modal message
+	help        bool           // true shows the full key-binding overlay
+
+	overviewLayout []config.PanelPref             // nil = built-in default order
+	saveLayout     func([]config.PanelPref) error // persists a customised layout
+	layoutEdit     *layoutEditor                  // non-nil while the layout editor is open
 
 	// detail-pager search + horizontal scroll state
 	searching   bool
@@ -174,6 +185,8 @@ func RunView(scr *tui.Screen, events <-chan tui.Event, client Client, srv config
 	m := &model{srv: srv, client: client, interval: opts.Interval, readOnly: opts.ReadOnly}
 	m.redial = opts.Redial
 	m.anon = opts.Anonymize
+	m.overviewLayout = opts.Overview
+	m.saveLayout = opts.SaveLayout
 	// Collection runs in a goroutine and reports back on these channels so the
 	// SSH round trip (and the remote CPU-sampling sleep) never blocks input.
 	m.results = make(chan collectResult, 1)
@@ -387,8 +400,8 @@ func (m *model) rebuildLists() {
 			name = tui.Green(name) // active interface
 		}
 		netRows = append(netRows, name+fmt.Sprintf(" ↓ %10s/s  ↑ %10s/s   rx %9s  tx %9s",
-			humanBytes(rx), humanBytes(tx),
-			humanBytes(float64(ni.RxBytes)), humanBytes(float64(ni.TxBytes))))
+			tui.HumanBytes(rx), tui.HumanBytes(tx),
+			tui.HumanBytes(float64(ni.RxBytes)), tui.HumanBytes(float64(ni.TxBytes))))
 	}
 	m.net.Header = tui.Pad("IFACE", 14) + "        DOWN             UP      TOTALS"
 	m.net.SetRows(netRows)
@@ -397,8 +410,8 @@ func (m *model) rebuildLists() {
 	for _, d := range s.Disks {
 		pct := d.UsedPercent()
 		diskRows = append(diskRows, fmt.Sprintf("%s %s %s  %9s / %-9s",
-			tui.Pad(d.Mount, 22), makeBar(pct, 12), tui.ThreshColor(fmt.Sprintf("%5.1f%%", pct), pct),
-			humanBytes(float64(d.UsedBytes)), humanBytes(float64(d.TotalBytes))))
+			tui.Pad(d.Mount, 22), tui.Bar(pct, 12), tui.ThreshColor(fmt.Sprintf("%5.1f%%", pct), pct),
+			tui.HumanBytes(float64(d.UsedBytes)), tui.HumanBytes(float64(d.TotalBytes))))
 	}
 	m.disk.Header = tui.Pad("MOUNT", 22) + " " + tui.Pad("USAGE", 14) + "  used / total"
 	m.disk.SetRows(diskRows)
@@ -471,7 +484,7 @@ func runPlain(client Client, srv config.Server, interval time.Duration, anon boo
 			fmt.Println("  error:", err)
 		} else {
 			fmt.Printf("  %s · up %s · CPU %.1f%% · MEM %.1f%% · load %.2f\n",
-				host, humanDuration(s.UptimeSec), s.CPUPercent, s.MemUsedPercent, s.Load1)
+				host, tui.HumanDuration(s.UptimeSec), s.CPUPercent, s.MemUsedPercent, s.Load1)
 			for i, p := range s.Procs {
 				if i >= 5 {
 					break
