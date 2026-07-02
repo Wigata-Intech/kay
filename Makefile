@@ -73,7 +73,7 @@ release-snapshot: ## Local GoReleaser dry-run, no publish (needs goreleaser)
 
 .PHONY: demo
 demo: build ## Record the anonymized demo GIF (needs vhs)
-	KAY_DEMO=1 vhs docs/demo.tape
+	KAY_DEMO=1 vhs assets/demo.tape
 
 .PHONY: clean
 clean: ## Remove build artifacts

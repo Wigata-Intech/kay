@@ -95,8 +95,11 @@ func (m *model) renderPanel(name string) []string {
 // Responsive Overview column tuning: each column needs ~44 cols to hold a panel
 // comfortably, columns are gap-separated, and we never exceed three.
 const (
-	overviewMinCol = 40 // 2 cols at ≥85, 3 cols at ≥130 (with the divider below)
-	overviewGap    = 5  // width of the inter-column divider ("  │  ")
+	// A panel's widest lines (gauge + suffix, net rates, Docker health) run ~48
+	// cols, so require 50 per column before splitting — otherwise columns clip
+	// content. 2 cols at ≥105, 3 cols at ≥160 (including the dividers below).
+	overviewMinCol = 50
+	overviewGap    = 5 // width of the inter-column divider ("  │  ")
 	overviewMaxCol = 3
 )
 

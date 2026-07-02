@@ -6,13 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-02
+
+A major dashboard and fleet release. Fleet now keeps one persistent, self-healing
+SSH connection per host; the Overview is a responsive, customisable multi-column
+grid with eight panels and richer metrics (per-core CPU, swap, inodes,
+connections, failed services, kernel/OS); the `tui` toolkit gained reusable,
+extractable widgets; and a `?` help overlay plus fleet drill-in round out the UX.
+
 ### Changed
 
 - **Responsive Overview** — the Overview now flows its panels into one, two, or
-  three columns depending on terminal width (≥84 cols → two, ≥128 → three),
-  balancing panel heights, and uses width up to 200 cols instead of the old
-  100-col cap. Customised layouts keep the multi-column rendering (previously a
-  custom layout dropped to a single stacked column).
+  three columns depending on terminal width (≥105 cols → two, ≥160 → three),
+  filling the width with a divider between columns, laid out as an ordered grid
+  (row-major, honouring your panel order), and using width up to 200 cols instead
+  of the old 100-col cap. Customised layouts keep the multi-column rendering
+  (previously a custom layout dropped to a single stacked column).
 - **`internal/tui` gained reusable widgets** — `Bar`, `Gauge`, `Sparkline`,
   `Columns`, `ColumnCount`, `HumanBytes`, `HumanDuration` moved out of the
   dashboard so the toolkit stays UI-agnostic and reusable (domain colouring stays
@@ -227,7 +236,8 @@ Initial release.
 - Public-key authentication only (password used solely for assisted install);
   no telemetry.
 
-[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Wigata-Intech/kay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wigata-Intech/kay/releases/tag/v0.1.0

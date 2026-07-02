@@ -9,10 +9,13 @@
 coverage.txt
 coverage.html
 
-# In docs/, commit ONLY the final demo.gif. Everything else there — the vhs
-# tapes, blur.sh, and any raw/intermediate recordings — stays local.
-docs/*
-!docs/demo.gif
+# Demo pipeline lives in assets/: the vhs tapes, blur.sh, and the final
+# (anonymized) demo.gif are tracked; only the real-data raw recording is
+# confidential and stays local.
+assets/blur.sh
+assets/demo-non-anon.tape
+assets/demo-raw.gif
+
 
 # Release / build output
 /dist/

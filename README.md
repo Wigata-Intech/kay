@@ -13,7 +13,7 @@ A small, single-binary CLI to manage a fleet of Linux servers over SSH:
 generate keys, register servers, install keys, run commands, and watch a
 refreshing metrics dashboard — for one host or your whole fleet.
 
-![kay dashboard demo](docs/demo.gif)
+![kay dashboard demo](assets/demo.gif)
 
 Built with the Go standard library plus the `golang.org/x` `crypto`, `term`, and
 `sys` packages (the only third-party dependencies). Design: KISS, DRY —
@@ -133,11 +133,13 @@ Overview: o customise panels — j/k select · J/K move · space hide · w save 
 Keys are vim-friendly throughout: `h/j/k/l` move, `g/G` jump to ends, `H/L`
 switch tabs, and `Esc`/`q` back out of any overlay.
 
-The Overview shows CPU/memory sparkline history; on wide terminals it splits
-into system gauges (left) and top processes (right). Press **`o`** to customise
-it: reorder the panels (System, Top processes, Network, Docker) with `J`/`K` and
-hide the ones you don't want with `space`, then `w` to save. Your layout persists
-in `config.json` and applies to every host's dashboard.
+The Overview is a **responsive grid** of panels — System (CPU + per-core + load),
+Memory (RAM + swap + cached), Top processes, Disk (space + inodes), Network,
+Docker, Connections, and Services (failed units) — flowing into one, two, or
+three columns as the terminal widens, with CPU/memory sparkline history. Press
+**`o`** to customise it: reorder panels with `J`/`K` and hide them with `space`,
+then `w` to save. Your layout persists in `config.json` and applies to every
+host's dashboard.
 
 Navigation is vim-friendly (`j/k`, `g/G`, `h/l`, `Ctrl-U/Ctrl-D`). The
 inspect/logs overlay is a scrollable, horizontally-pannable pager with `/`
