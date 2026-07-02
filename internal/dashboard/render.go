@@ -37,7 +37,7 @@ func (m *model) overviewNet(max int) []string {
 		if i >= max {
 			break
 		}
-		out = append(out, fmt.Sprintf("NET  %s ↓ %10s/s  ↑ %10s/s", tui.Pad(e.ni.Name, 12), humanBytes(e.rx), humanBytes(e.tx)))
+		out = append(out, fmt.Sprintf("NET  %s ↓ %10s/s  ↑ %10s/s", tui.Pad(e.ni.Name, 12), tui.HumanBytes(e.rx), tui.HumanBytes(e.tx)))
 	}
 	if len(list) > max {
 		out = append(out, tui.Dim(fmt.Sprintf("     +%d more interfaces — see Network tab", len(list)-max)))
@@ -50,8 +50,8 @@ func (m *model) render(w, h int) []string {
 		return tooSmall(w, h)
 	}
 	cw := w
-	if cw > 100 {
-		cw = 100
+	if cw > 200 {
+		cw = 200 // sanity cap on ultra-wide terminals; the Overview uses columns to fill it
 	}
 	innerW := cw - 4 // box side borders + padding
 	innerH := h - 5  // header + tab bar + box top/bottom + footer
@@ -124,7 +124,7 @@ func (m *model) renderOverlay(cw, innerW, innerH, w, h int) ([]string, bool) {
 func (m *model) headerBar(w int) string {
 	up := "—"
 	if m.have {
-		up = humanDuration(m.snap.UptimeSec)
+		up = tui.HumanDuration(m.snap.UptimeSec)
 	}
 	alias, user, addr := m.srv.Alias, m.srv.User, m.srv.Addr()
 	if m.anon {
@@ -143,71 +143,40 @@ func (m *model) renderOverview(width int) []string {
 	if m.err != nil {
 		return []string{"", tui.Red("⚠ collection error: " + tui.FirstLine(m.err.Error())), "", tui.Dim("retrying on next tick…")}
 	}
-	// A customised layout renders panels stacked in the user's order; the default
-	// (uncustomised) layout keeps the two-column composition below.
-	if m.overviewLayout != nil {
-		return m.renderOverviewCustom()
+	// Build each visible panel as a block (title + body) in the user's order, then
+	// flow the blocks into as many columns as the width allows — one when narrow,
+	// up to three when very wide — so the layout is responsive and the panel order
+	// from the `o` editor is honoured in every column count.
+	var blocks [][]string
+	for _, p := range m.effectiveLayout() {
+		if p.Hidden {
+			continue
+		}
+		if b := m.renderPanel(p.Name); len(b) > 0 {
+			blocks = append(blocks, b)
+		}
 	}
-	s := m.snap
-	var L []string
-
-	// Wide terminals get a two-column top (system gauges | top processes);
-	// narrow ones stack the same content.
-	if width >= 88 {
-		left := append([]string{tui.Cyan("System")}, m.overviewSystem(s)...)
-		right := append([]string{tui.Cyan("Top processes")}, m.overviewProcs(s, 6)...)
-		L = append(L, tui.Join(left, right, 4)...)
-	} else {
-		L = append(L, m.overviewSystem(s)...)
-		L = append(L, "")
-		L = append(L, m.overviewProcs(s, 3)...)
+	if len(blocks) == 0 {
+		return []string{"", tui.Dim("all panels hidden — press o to customise the Overview")}
 	}
-	L = append(L, "")
-	L = append(L, m.overviewNet(4)...) // busiest few; full list is on the Network tab
-	L = append(L, "")
-	L = append(L, m.overviewDocker(s))
-	return L
+	return layoutPanels(blocks, width)
 }
 
 func (m *model) overviewSystem(s metrics.Snapshot) []string {
 	L := []string{
-		gaugeLine("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU)),
-		gaugeLine("MEM", s.MemUsedPercent, 18,
+		tui.Gauge("CPU", s.CPUPercent, 18, fmt.Sprintf("%d cores", s.NumCPU)),
+		tui.Gauge("MEM", s.MemUsedPercent, 18,
 			fmt.Sprintf("%s / %s", humanKB(s.MemTotalKB-s.MemAvailableKB), humanKB(s.MemTotalKB))),
 	}
 	if d, ok := s.RootDisk(); ok {
-		L = append(L, gaugeLine("DISK", d.UsedPercent(), 18,
-			fmt.Sprintf("%s (%s)", d.Mount, humanBytes(float64(d.TotalBytes)))))
+		L = append(L, tui.Gauge("DISK", d.UsedPercent(), 18,
+			fmt.Sprintf("%s (%s)", d.Mount, tui.HumanBytes(float64(d.TotalBytes)))))
 	}
 	L = append(L, fmt.Sprintf("LOAD %s %.2f %.2f",
 		loadColor(s.Load1, s.NumCPU, fmt.Sprintf("%.2f", s.Load1)), s.Load5, s.Load15))
-	L = append(L, "cpu "+sparkline(m.cpuHist, 16))
-	L = append(L, "mem "+sparkline(m.memHist, 16))
+	L = append(L, "cpu "+tui.Sparkline(m.cpuHist, 16))
+	L = append(L, "mem "+tui.Sparkline(m.memHist, 16))
 	return L
-}
-
-var sparkRunes = []rune("▁▂▃▄▅▆▇█")
-
-// sparkline renders recent values (0..100) as a compact block-character trend,
-// coloured by the latest value.
-func sparkline(v []float64, width int) string {
-	if len(v) == 0 {
-		return tui.Dim("(collecting…)")
-	}
-	if len(v) > width {
-		v = v[len(v)-width:]
-	}
-	var b strings.Builder
-	for _, x := range v {
-		if x < 0 {
-			x = 0
-		}
-		if x > 100 {
-			x = 100
-		}
-		b.WriteRune(sparkRunes[int(x/100*float64(len(sparkRunes)-1)+0.5)])
-	}
-	return tui.ThreshColor(b.String(), v[len(v)-1])
 }
 
 func (m *model) overviewProcs(s metrics.Snapshot, n int) []string {

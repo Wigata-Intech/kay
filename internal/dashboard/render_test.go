@@ -9,27 +9,6 @@ import (
 	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
-func TestSparkline(t *testing.T) {
-	noColor(t)
-	t.Run("empty-collecting", func(t *testing.T) {
-		if got := sparkline(nil, 8); !strings.Contains(got, "collecting") {
-			t.Errorf("sparkline(nil) = %q, want collecting note", got)
-		}
-	})
-	t.Run("renders-blocks", func(t *testing.T) {
-		got := sparkline([]float64{0, 50, 100}, 8)
-		if got != "▁▅█" {
-			t.Errorf("sparkline = %q, want %q", got, "▁▅█")
-		}
-	})
-	t.Run("clamps-and-truncates-to-width", func(t *testing.T) {
-		got := sparkline([]float64{-10, 200, 200, 200}, 2)
-		if []rune(got)[0] != '█' || len([]rune(got)) != 2 {
-			t.Errorf("sparkline clamp/trunc = %q", got)
-		}
-	})
-}
-
 func TestOverviewDocker(t *testing.T) {
 	noColor(t)
 	tests := []struct {

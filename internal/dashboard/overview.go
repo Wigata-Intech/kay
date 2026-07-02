@@ -79,28 +79,58 @@ func (m *model) renderPanel(name string) []string {
 	return nil
 }
 
-// renderOverviewCustom renders the Overview as a vertical stack of the user's
-// visible panels, in their saved order. (The default, uncustomised layout keeps
-// the two-column rendering in renderOverview.)
-func (m *model) renderOverviewCustom() []string {
+// Responsive Overview column tuning: each column needs ~44 cols to hold a panel
+// comfortably, columns are gap-separated, and we never exceed three.
+const (
+	overviewMinCol = 40 // 2 cols at ≥84, 3 cols at ≥128 (with the gap below)
+	overviewGap    = 4
+	overviewMaxCol = 3
+)
+
+// layoutPanels flows panel blocks into responsive columns: one column stacks them
+// with blank separators; wider terminals get up to three columns, each new panel
+// placed in the currently-shortest column so heights stay balanced (a simple
+// masonry). This keeps the two-column look on normal terminals and uses extra
+// width for a third column instead of wasting it.
+func layoutPanels(blocks [][]string, width int) []string {
+	n := tui.ColumnCount(width, overviewMinCol, overviewGap, overviewMaxCol)
+	if n <= 1 {
+		return stackBlocks(blocks)
+	}
+	cols := make([][]string, n)
+	heights := make([]int, n)
+	for _, b := range blocks {
+		c := shortestColumn(heights)
+		if len(cols[c]) > 0 {
+			cols[c] = append(cols[c], "") // blank line between stacked panels
+		}
+		cols[c] = append(cols[c], b...)
+		heights[c] += len(b) + 1
+	}
+	return tui.Columns(cols, overviewGap)
+}
+
+// stackBlocks joins panel blocks vertically with a blank line between them.
+func stackBlocks(blocks [][]string) []string {
 	var L []string
-	for _, p := range m.effectiveLayout() {
-		if p.Hidden {
-			continue
-		}
-		block := m.renderPanel(p.Name)
-		if len(block) == 0 {
-			continue
-		}
+	for _, b := range blocks {
 		if len(L) > 0 {
 			L = append(L, "")
 		}
-		L = append(L, block...)
-	}
-	if len(L) == 0 {
-		return []string{"", tui.Dim("all panels hidden — press o to customise the Overview")}
+		L = append(L, b...)
 	}
 	return L
+}
+
+// shortestColumn returns the index of the column with the fewest lines so far.
+func shortestColumn(heights []int) int {
+	best := 0
+	for i, h := range heights {
+		if h < heights[best] {
+			best = i
+		}
+	}
+	return best
 }
 
 // layoutEditor is the interactive Overview panel reorder/hide overlay.

@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Responsive Overview** — the Overview now flows its panels into one, two, or
+  three columns depending on terminal width (≥84 cols → two, ≥128 → three),
+  balancing panel heights, and uses width up to 200 cols instead of the old
+  100-col cap. Customised layouts keep the multi-column rendering (previously a
+  custom layout dropped to a single stacked column).
+- **`internal/tui` gained reusable widgets** — `Bar`, `Gauge`, `Sparkline`,
+  `Columns`, `ColumnCount`, `HumanBytes`, `HumanDuration` moved out of the
+  dashboard so the toolkit stays UI-agnostic and reusable (domain colouring stays
+  in the dashboard).
+
+### Fixed
+
+- **`kay version` on local builds** — when not built via GoReleaser it now falls
+  back to the VCS revision/date Go embeds (`kay dev (rev abc1234, <date>, dirty)`)
+  instead of a bare `dev`.
+
 ### Added
 
 - **Customisable Overview** — press `o` in the dashboard's Overview tab to reorder

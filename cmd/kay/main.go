@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -74,20 +75,60 @@ func main() {
 	}
 }
 
-// cmdVersion prints the build version with optional commit/date, set via ldflags.
+// cmdVersion prints the build version with optional commit/date. Release builds
+// set these via ldflags; for local `go build`/`make build` (no ldflags) it falls
+// back to the VCS stamp Go embeds in the binary, so `kay version` is never bare.
 func cmdVersion() {
-	v := version
-	var extra []string
-	if commit != "" {
-		extra = append(extra, commit)
+	v, c, d := version, commit, date
+	if c == "" || d == "" {
+		if rev, when, ok := vcsStamp(); ok {
+			if c == "" {
+				c = rev
+			}
+			if d == "" {
+				d = when
+			}
+		}
 	}
-	if date != "" {
-		extra = append(extra, date)
+	var extra []string
+	if c != "" {
+		extra = append(extra, c)
+	}
+	if d != "" {
+		extra = append(extra, d)
 	}
 	if len(extra) > 0 {
 		v += " (" + strings.Join(extra, ", ") + ")"
 	}
 	fmt.Println("kay " + v)
+}
+
+// vcsStamp reads the VCS revision/time Go embeds during `go build` in a git
+// checkout, used when ldflags didn't supply commit/date. The revision is
+// shortened and marked "-dirty" when the working tree had uncommitted changes.
+func vcsStamp() (rev, when string, ok bool) {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", "", false
+	}
+	var dirty bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+		case "vcs.time":
+			when = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if dirty && rev != "" {
+		rev += "-dirty"
+	}
+	return rev, when, rev != "" || when != ""
 }
 
 func usage() {

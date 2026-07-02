@@ -399,8 +399,8 @@ func (m *model) rebuildLists() {
 			name = tui.Green(name) // active interface
 		}
 		netRows = append(netRows, name+fmt.Sprintf(" ↓ %10s/s  ↑ %10s/s   rx %9s  tx %9s",
-			humanBytes(rx), humanBytes(tx),
-			humanBytes(float64(ni.RxBytes)), humanBytes(float64(ni.TxBytes))))
+			tui.HumanBytes(rx), tui.HumanBytes(tx),
+			tui.HumanBytes(float64(ni.RxBytes)), tui.HumanBytes(float64(ni.TxBytes))))
 	}
 	m.net.Header = tui.Pad("IFACE", 14) + "        DOWN             UP      TOTALS"
 	m.net.SetRows(netRows)
@@ -409,8 +409,8 @@ func (m *model) rebuildLists() {
 	for _, d := range s.Disks {
 		pct := d.UsedPercent()
 		diskRows = append(diskRows, fmt.Sprintf("%s %s %s  %9s / %-9s",
-			tui.Pad(d.Mount, 22), makeBar(pct, 12), tui.ThreshColor(fmt.Sprintf("%5.1f%%", pct), pct),
-			humanBytes(float64(d.UsedBytes)), humanBytes(float64(d.TotalBytes))))
+			tui.Pad(d.Mount, 22), tui.Bar(pct, 12), tui.ThreshColor(fmt.Sprintf("%5.1f%%", pct), pct),
+			tui.HumanBytes(float64(d.UsedBytes)), tui.HumanBytes(float64(d.TotalBytes))))
 	}
 	m.disk.Header = tui.Pad("MOUNT", 22) + " " + tui.Pad("USAGE", 14) + "  used / total"
 	m.disk.SetRows(diskRows)
@@ -483,7 +483,7 @@ func runPlain(client Client, srv config.Server, interval time.Duration, anon boo
 			fmt.Println("  error:", err)
 		} else {
 			fmt.Printf("  %s · up %s · CPU %.1f%% · MEM %.1f%% · load %.2f\n",
-				host, humanDuration(s.UptimeSec), s.CPUPercent, s.MemUsedPercent, s.Load1)
+				host, tui.HumanDuration(s.UptimeSec), s.CPUPercent, s.MemUsedPercent, s.Load1)
 			for i, p := range s.Procs {
 				if i >= 5 {
 					break

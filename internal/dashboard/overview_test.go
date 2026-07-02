@@ -74,7 +74,7 @@ func TestRenderOverviewCustom(t *testing.T) {
 		m := &model{overviewLayout: []config.PanelPref{
 			{Name: "docker"}, {Name: "system", Hidden: true}, {Name: "net", Hidden: true}, {Name: "procs", Hidden: true},
 		}}
-		out := strings.Join(m.renderOverviewCustom(), "\n")
+		out := strings.Join(m.renderOverview(120), "\n")
 		if !strings.Contains(out, "Docker") {
 			t.Errorf("visible Docker panel missing: %q", out)
 		}
@@ -88,7 +88,7 @@ func TestRenderOverviewCustom(t *testing.T) {
 			{Name: "system", Hidden: true}, {Name: "procs", Hidden: true},
 			{Name: "net", Hidden: true}, {Name: "docker", Hidden: true},
 		}}
-		out := strings.Join(m.renderOverviewCustom(), "\n")
+		out := strings.Join(m.renderOverview(120), "\n")
 		if !strings.Contains(out, "all panels hidden") {
 			t.Errorf("expected all-hidden hint, got %q", out)
 		}
@@ -108,7 +108,7 @@ func TestRenderOverviewCustomAllPanels(t *testing.T) {
 			Docker: []metrics.Container{{Name: "web", Status: "Up (healthy)"}}, DockerPresent: true,
 		},
 	}
-	out := strings.Join(m.renderOverviewCustom(), "\n")
+	out := strings.Join(m.renderOverview(120), "\n")
 	for _, want := range []string{"System", "Top processes", "Network", "Docker"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("custom overview missing %q panel:\n%s", want, out)
