@@ -82,6 +82,11 @@ type Snapshot struct {
 	Disks          []Disk
 	Docker         []Container
 	DockerPresent  bool
+	TCPInUse       int      // established/active TCP sockets
+	TCPTimeWait    int      // sockets in TIME_WAIT
+	FailedUnits    []string // failed systemd units (empty on non-systemd hosts)
+	Kernel         string   // e.g. "Linux 6.1.0-21-amd64"
+	OSName         string   // e.g. "Ubuntu 24.04.1 LTS"
 }
 
 // RootDisk returns the filesystem mounted at "/", or the largest one.
@@ -121,6 +126,9 @@ else
   ps -eo pid,pcpu,pmem,comm --sort=-pcpu --no-headers 2>/dev/null | awk '{print $1"|"$2"|"$3"|"$4}' | head -20
 fi
 echo '@@DOCKER'; if command -v docker >/dev/null 2>&1; then echo PRESENT; docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null; else echo ABSENT; fi
+echo '@@CONN'; cat /proc/net/sockstat 2>/dev/null
+echo '@@SVC'; if command -v systemctl >/dev/null 2>&1; then systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}'; fi
+echo '@@OS'; uname -sr; (. /etc/os-release 2>/dev/null; printf '%s\n' "${PRETTY_NAME:-}")
 echo '@@END'
 `
 
@@ -157,7 +165,52 @@ func Parse(out string) (Snapshot, error) {
 	mergeInodes(s.Disks, sec["INODES"])
 	s.Procs = parseProcs(sec["PROC"])
 	s.Docker, s.DockerPresent = parseDocker(sec["DOCKER"])
+	s.TCPInUse, s.TCPTimeWait = parseSockstat(sec["CONN"])
+	s.FailedUnits = parseFailed(sec["SVC"])
+	s.Kernel, s.OSName = parseOS(sec["OS"])
 	return s, nil
+}
+
+// parseSockstat pulls TCP in-use and time-wait counts from /proc/net/sockstat.
+func parseSockstat(s string) (inuse, tw int) {
+	for _, line := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(line, "TCP:") {
+			continue
+		}
+		f := strings.Fields(line)
+		for i := 0; i+1 < len(f); i++ {
+			switch f[i] {
+			case "inuse":
+				inuse, _ = strconv.Atoi(f[i+1])
+			case "tw":
+				tw, _ = strconv.Atoi(f[i+1])
+			}
+		}
+	}
+	return
+}
+
+// parseFailed returns the failed systemd unit names (one per line).
+func parseFailed(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if u := strings.TrimSpace(line); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// parseOS reads the kernel (line 1: `uname -sr`) and distro pretty name (line 2).
+func parseOS(s string) (kernel, name string) {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > 0 {
+		kernel = strings.TrimSpace(lines[0])
+	}
+	if len(lines) > 1 {
+		name = strings.TrimSpace(lines[1])
+	}
+	return
 }
 
 func split(out string) map[string]string {

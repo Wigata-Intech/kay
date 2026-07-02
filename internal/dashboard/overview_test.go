@@ -26,21 +26,21 @@ func TestEffectiveLayout(t *testing.T) {
 		saved []config.PanelPref
 		want  []string
 	}{
-		{name: "nil is the default order", saved: nil, want: []string{"system", "memory", "procs", "disk", "net", "docker"}},
+		{name: "nil is the default order", saved: nil, want: []string{"system", "memory", "procs", "disk", "net", "docker", "connections", "services"}},
 		{
 			name:  "custom order, missing panels appended",
 			saved: []config.PanelPref{{Name: "docker"}, {Name: "system", Hidden: true}},
-			want:  []string{"docker", "system", "memory", "procs", "disk", "net"},
+			want:  []string{"docker", "system", "memory", "procs", "disk", "net", "connections", "services"},
 		},
 		{
 			name:  "unknown names dropped",
 			saved: []config.PanelPref{{Name: "bogus"}, {Name: "net"}},
-			want:  []string{"net", "system", "memory", "procs", "disk", "docker"},
+			want:  []string{"net", "system", "memory", "procs", "disk", "docker", "connections", "services"},
 		},
 		{
 			name:  "duplicates collapsed",
 			saved: []config.PanelPref{{Name: "system"}, {Name: "system"}},
-			want:  []string{"system", "memory", "procs", "disk", "net", "docker"},
+			want:  []string{"system", "memory", "procs", "disk", "net", "docker", "connections", "services"},
 		},
 	}
 	for _, tt := range tests {

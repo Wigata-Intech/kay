@@ -17,6 +17,8 @@ var overviewPanels = []struct{ name, title string }{
 	{"disk", "Disk"},
 	{"net", "Network"},
 	{"docker", "Docker"},
+	{"connections", "Connections"},
+	{"services", "Services"},
 }
 
 func panelTitle(name string) string {
@@ -81,6 +83,11 @@ func (m *model) renderPanel(name string) []string {
 		return append([]string{tui.Cyan("Network")}, net...)
 	case "docker":
 		return []string{tui.Cyan("Docker"), m.overviewDocker(s)}
+	case "connections":
+		return []string{tui.Cyan("Connections"),
+			fmt.Sprintf("TCP  %d active · %d time-wait", s.TCPInUse, s.TCPTimeWait)}
+	case "services":
+		return append([]string{tui.Cyan("Services")}, m.overviewServices(s)...)
 	}
 	return nil
 }
@@ -94,32 +101,29 @@ const (
 )
 
 // layoutPanels flows panel blocks into responsive columns: one column stacks them
-// with blank separators; wider terminals get up to three columns, each new panel
-// placed in the currently-shortest column so heights stay balanced (a simple
-// masonry). Columns are stretched to fill the width equally and separated by a
-// dim vertical divider, so extra width becomes breathing room rather than dead
-// space on the right.
+// with blank separators; wider terminals get up to three columns. Panels are
+// dealt out row-major in their configured order (panel i → column i%n), so the
+// grid reads left-to-right then top-to-bottom and the order from the `o` editor is
+// preserved (rather than being reshuffled to balance height). Columns are
+// stretched to fill the width and separated by a dim vertical divider.
 func layoutPanels(blocks [][]string, width int) []string {
 	n := tui.ColumnCount(width, overviewMinCol, overviewGap, overviewMaxCol)
 	if n <= 1 {
 		return stackBlocks(blocks)
 	}
-	cols := make([][]string, n)
-	heights := make([]int, n)
-	for _, b := range blocks {
-		c := shortestColumn(heights)
-		if len(cols[c]) > 0 {
-			cols[c] = append(cols[c], "") // blank line between stacked panels
-		}
-		cols[c] = append(cols[c], b...)
-		heights[c] += len(b) + 1
-	}
-	divider := "  " + tui.Dim("│") + "  "
 	colWidth := (width - (n-1)*overviewGap) / n
 	if colWidth < 1 {
 		return stackBlocks(blocks)
 	}
-	return tui.ColumnsDivided(cols, colWidth, divider)
+	cols := make([][]string, n)
+	for i, b := range blocks {
+		c := i % n
+		if len(cols[c]) > 0 {
+			cols[c] = append(cols[c], "") // blank line between stacked panels
+		}
+		cols[c] = append(cols[c], b...)
+	}
+	return tui.ColumnsDivided(cols, colWidth, "  "+tui.Dim("│")+"  ")
 }
 
 // stackBlocks joins panel blocks vertically with a blank line between them.
@@ -132,17 +136,6 @@ func stackBlocks(blocks [][]string) []string {
 		L = append(L, b...)
 	}
 	return L
-}
-
-// shortestColumn returns the index of the column with the fewest lines so far.
-func shortestColumn(heights []int) int {
-	best := 0
-	for i, h := range heights {
-		if h < heights[best] {
-			best = i
-		}
-	}
-	return best
 }
 
 // layoutEditor is the interactive Overview panel reorder/hide overlay.

@@ -51,6 +51,15 @@ proc|0|0|/proc
 PRESENT
 abc123|web|nginx:latest|Up 2 hours
 def456|db|postgres:16|Up 5 minutes
+@@CONN
+sockets: used 100
+TCP: inuse 19 orphan 0 tw 2 alloc 151 mem 216
+@@SVC
+fail2ban.service
+nginx.service
+@@OS
+Linux 6.8.0-87-generic
+Ubuntu 24.04.4 LTS
 @@END
 `
 
@@ -137,6 +146,18 @@ func TestParseFixture(t *testing.T) {
 		if !s.DockerPresent || len(s.Docker) != 2 ||
 			s.Docker[0].Name != "web" || s.Docker[0].Image != "nginx:latest" {
 			t.Errorf("docker = %+v present=%v", s.Docker, s.DockerPresent)
+		}
+	})
+
+	t.Run("conn_services_os", func(t *testing.T) {
+		if s.TCPInUse != 19 || s.TCPTimeWait != 2 {
+			t.Errorf("tcp inuse/tw = %d/%d, want 19/2", s.TCPInUse, s.TCPTimeWait)
+		}
+		if len(s.FailedUnits) != 2 || s.FailedUnits[0] != "fail2ban.service" {
+			t.Errorf("failed units = %v, want [fail2ban.service nginx.service]", s.FailedUnits)
+		}
+		if s.Kernel != "Linux 6.8.0-87-generic" || s.OSName != "Ubuntu 24.04.4 LTS" {
+			t.Errorf("kernel/os = %q / %q", s.Kernel, s.OSName)
 		}
 	})
 }

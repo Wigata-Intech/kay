@@ -131,6 +131,9 @@ func (m *model) headerBar(w int) string {
 		alias, user, addr = "server", "user", "demo.host"
 	}
 	left := fmt.Sprintf("kay · %s · %s@%s · up %s", alias, user, addr, up)
+	if m.snap.OSName != "" && !m.anon {
+		left += " · " + m.snap.OSName
+	}
 	right := fmt.Sprintf("%s · every %s", time.Now().Format("15:04:05"), m.interval)
 	gap := w - tui.VisibleWidth(left) - tui.VisibleWidth(right) - 1
 	if gap < 1 {
@@ -203,6 +206,26 @@ func (m *model) overviewDisk(s metrics.Snapshot) []string {
 		fmt.Sprintf("%s (%s)", d.Mount, tui.HumanBytes(float64(d.TotalBytes))))}
 	if d.InodesTotal > 0 {
 		L = append(L, tui.Gauge("INOD", d.InodesPercent(), 18, "inodes"))
+	}
+	return L
+}
+
+// overviewServices is the systemd panel body: an all-clear line, or the failed
+// unit count and the first few names.
+func (m *model) overviewServices(s metrics.Snapshot) []string {
+	if len(s.FailedUnits) == 0 {
+		return []string{tui.Green("no failed units")}
+	}
+	L := []string{tui.Red(fmt.Sprintf("%d failed", len(s.FailedUnits)))}
+	for i, u := range s.FailedUnits {
+		if i >= 3 {
+			L = append(L, tui.Dim(fmt.Sprintf("+%d more", len(s.FailedUnits)-3)))
+			break
+		}
+		if m.anon {
+			u = fmt.Sprintf("unit-%d", i+1)
+		}
+		L = append(L, "  "+u)
 	}
 	return L
 }

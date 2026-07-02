@@ -28,11 +28,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - **More Overview panels & metrics** — the batched metrics script (still one SSH
   round-trip) now also collects **per-core CPU**, **swap** and **cached** memory,
-  and **inode usage** per filesystem. The Overview gains dedicated **Memory**
-  (RAM + swap gauges + cached) and **Disk** (space + inode gauges) panels, and the
-  System panel shows a per-core level strip (`core ▇▂▅▂`). All six panels
-  (System, Memory, Top processes, Disk, Network, Docker) are reorderable/hideable
-  via the `o` editor.
+  **inode usage** per filesystem, **TCP connection counts** (`/proc/net/sockstat`),
+  **failed systemd units**, and the **kernel / OS release**. The Overview gains
+  dedicated **Memory** (RAM + swap + cached), **Disk** (space + inodes),
+  **Connections** (active / time-wait), and **Services** (failed units) panels; the
+  System panel shows a per-core level strip (`core ▇▂▅▂`) and the header shows the
+  OS. All eight panels are reorderable/hideable via the `o` editor and now lay out
+  as an ordered grid (row-major, honouring your panel order) that fills the width
+  with a divider between columns.
 - **Customisable Overview** — press `o` in the dashboard's Overview tab to reorder
   its panels (System, Top processes, Network, Docker) and hide the ones you don't
   want: `j/k` select, `J/K` move, `space` toggle, `w` save, `Esc` cancel. The
