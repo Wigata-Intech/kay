@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `make build` now stamps the binary with `git describe` (`kay v0.3.0` on a
+  tag, `v0.3.0-2-gabc1234-dirty` off one); release builds keep their
+  GoReleaser-stamped version.
+
 ## [0.3.0] - 2026-08-15
 
 ### Changed

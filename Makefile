@@ -27,8 +27,8 @@ test: ## Run tests with the race detector (mirrors CI)
 	go test -race $(PKG)
 
 .PHONY: build
-build: ## Build the kay binary
-	go build -o $(BINARY) ./cmd/kay
+build: ## Build the kay binary (version from git describe; releases use GoReleaser ldflags)
+	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" -o $(BINARY) ./cmd/kay
 
 .PHONY: lint
 lint: ## Run golangci-lint v2 = staticcheck + others (install: https://golangci-lint.run)
