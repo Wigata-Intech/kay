@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod # exact patched floor; never races runner toolchain caches
 
       # Release notes come from the tagged version's CHANGELOG.md section, so the
       # curated changelog is the single source of truth (not commit messages).

@@ -20,8 +20,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.x'
-          check-latest: true
+          go-version-file: go.mod # exact patched floor; never races runner toolchain caches
 
       - name: Compute coverage
         id: cov
