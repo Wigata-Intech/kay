@@ -5,6 +5,7 @@
 package fleet
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -13,15 +14,15 @@ import (
 
 	"github.com/Wigata-Intech/kay/internal/config"
 	"github.com/Wigata-Intech/kay/internal/metrics"
-	"github.com/Wigata-Intech/kay/internal/sshx"
 	"github.com/Wigata-Intech/kay/internal/tui"
+	sshx "github.com/Wigata-Intech/w-tools/x/sshx"
 )
 
 // fakeConn is a scriptable collector: it reports a fixed connection state/error
 // and returns canned output from Run, so the fleet can be exercised without a
 // real SSH connection. ran, when set, is signalled on each Run.
 type fakeConn struct {
-	state  sshx.ConnState
+	state  sshx.State
 	err    error
 	out    string
 	runErr error
@@ -43,8 +44,8 @@ func (f *fakeConn) Run(string) (string, error) {
 	}
 	return f.out, f.runErr
 }
-func (f *fakeConn) State() sshx.ConnState { return f.state }
-func (f *fakeConn) Err() error            { return f.err }
+func (f *fakeConn) State() sshx.State { return f.state }
+func (f *fakeConn) Err() error        { return f.err }
 
 // noColor disables tui coloring for the duration of a test so string
 // assertions can match plain text, restoring the prior value afterwards.
@@ -349,7 +350,7 @@ func newFleetView(c collector) *fleetView {
 	}
 }
 
-func startFleetLoop(v *fleetView, scr screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan *Selection) {
+func startFleetLoop(v *fleetView, scr Screen) (chan tui.Event, chan time.Time, *time.Ticker, <-chan *Selection) {
 	ev := make(chan tui.Event)
 	tick := make(chan time.Time)
 	ticker := time.NewTicker(time.Hour) // never fires in tests; tick drives ticks
@@ -530,8 +531,8 @@ func TestTrigger(t *testing.T) {
 
 func TestNewSessionWiresConns(t *testing.T) {
 	hosts := []Host{
-		{Server: config.Server{Alias: "a"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
-		{Server: config.Server{Alias: "b"}, Dial: func() (*sshx.Client, error) { return nil, errors.New("no") }},
+		{Server: config.Server{Alias: "a"}, Dial: func(context.Context) (*sshx.Client, error) { return nil, errors.New("no") }},
+		{Server: config.Server{Alias: "b"}, Dial: func(context.Context) (*sshx.Client, error) { return nil, errors.New("no") }},
 	}
 	s := NewSession(hosts)
 	defer s.Close()

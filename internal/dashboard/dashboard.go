@@ -20,7 +20,7 @@ import (
 
 // Client is what the dashboard needs from an SSH connection: run a command and
 // return its combined output. It is an alias of metrics.Runner so the dashboard
-// and the metrics collector share one seam (both satisfied by *sshx.Client).
+// and the metrics collector share one seam (both satisfied by the SSH connection adapters).
 type Client = metrics.Runner
 
 // Options configures the dashboard.
@@ -139,9 +139,9 @@ type statResult struct {
 	err error
 }
 
-// screen is the subset of *tui.Screen the event loop needs. It is an interface
-// so loop can be driven in tests without owning a real terminal.
-type screen interface {
+// Screen is the subset of *tui.Screen the event loop needs. It is an
+// interface so views can be driven in tests without owning a real terminal.
+type Screen interface {
 	Size() (int, int)
 	Draw(lines []string)
 }
@@ -178,7 +178,7 @@ func Run(client Client, srv config.Server, opts Options) error {
 // (Ctrl-C / SIGTERM) rather than just this view (q / Esc). The fleet drill-in
 // coordinator uses this to hand off the terminal without re-entering the alt
 // screen — the caller owns scr and events for the whole session.
-func RunView(scr *tui.Screen, events <-chan tui.Event, client Client, srv config.Server, opts Options) (exitApp bool, err error) {
+func RunView(scr Screen, events <-chan tui.Event, client Client, srv config.Server, opts Options) (exitApp bool, err error) {
 	if opts.Interval <= 0 {
 		opts.Interval = 3 * time.Second
 	}
@@ -212,7 +212,7 @@ func RunView(scr *tui.Screen, events <-chan tui.Event, client Client, srv config
 // event and returns exitApp when the user quits — true for the whole app (Ctrl-C
 // / SIGTERM), false to leave just this view (q / Esc). The screen, input, signal,
 // and tick sources are injected so it can run headless in tests.
-func (m *model) loop(scr screen, events <-chan tui.Event, sigCh <-chan os.Signal, tick <-chan time.Time, resetTick func()) bool {
+func (m *model) loop(scr Screen, events <-chan tui.Event, sigCh <-chan os.Signal, tick <-chan time.Time, resetTick func()) bool {
 	draw := func() {
 		w, h := scr.Size()
 		scr.Draw(m.render(w, h))

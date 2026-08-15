@@ -18,8 +18,10 @@ internal/
 ├── fleet          multi-host fleet overview (kay fleet)         [app]
 ├── keys           key generation + PEM I/O                      [app]
 ├── metrics        remote metric collection + parsing            [library]
-├── sshx           SSH client path + self-healing connection pool [library]
 └── tui            minimal terminal UI toolkit                   [library]
+
+The SSH client path and self-healing connection pool live in the external
+module github.com/Wigata-Intech/w-tools/x/sshx (extracted from this repo).
 ```
 
 ## Dependency layering
@@ -33,28 +35,28 @@ cmd/kay ─┬─▶ config
          │              └─▶ tui
          ├─▶ fleet ─┬─▶ config
          │          ├─▶ metrics
-         │          ├─▶ sshx
+         │          ├─▶ w-tools/x/sshx
          │          └─▶ tui
-         ├─▶ keys ──▶ config
-         └─▶ sshx
+         ├─▶ keys ──▶ config, w-tools/x/sshx/keys
+         └─▶ w-tools/x/sshx
 ```
 
 | Package | Class | Imports (intra-project) | Promotable? |
 |---------|-------|--------------------------|-------------|
 | `config` | app | none | ➖ standalone but app-specific |
 | `dashboard` | app | `config`, `metrics`, `tui` | ✕ application UI |
-| `fleet` | app | `config`, `metrics`, `sshx`, `tui` | ✕ application UI |
+| `fleet` | app | `config`, `metrics`, `w-tools/x/sshx`, `tui` | ✕ application UI |
 | `keys` | app | `config` | ➖ app-specific |
 | `metrics` | library | none | ✅ yes |
-| `sshx` | library | none | ✅ yes |
 | `tui` | library | none | ✅ yes |
 | `cmd/kay` | app | all | ✕ binary |
 
-**Key property:** the three *library* packages (`metrics`, `sshx`, `tui`)
-import nothing from `kay`. That's enforced by convention and easy to verify:
+**Key property:** the *library* packages (`metrics`, `tui`) import nothing
+from `kay` — the same discipline that let `sshx` graduate into the shared
+`w-tools/x/sshx` module. Easy to verify:
 
 ```sh
-grep -rhoE '"github.com/Wigata-Intech/kay/[^"]+"' internal/metrics internal/sshx internal/tui
+grep -rhoE '"github.com/Wigata-Intech/kay/[^"]+"' internal/metrics internal/tui
 # (should print nothing)
 ```
 
@@ -76,7 +78,7 @@ redesigning to make the move.
 
 ## Rules to preserve this
 
-- Library packages (`metrics`, `sshx`, `tui`) must **not** import `config`,
+- Library packages (`metrics`, `tui`) must **not** import `config`,
   `keys`, `dashboard`, `fleet`, or `cmd`.
 - Prefer small interfaces at the boundary (e.g. `metrics.Runner`,
   `dashboard.Client`) over concrete cross-package types.

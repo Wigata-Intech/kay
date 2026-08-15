@@ -5,9 +5,11 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -19,9 +21,10 @@ import (
 	"github.com/Wigata-Intech/kay/internal/dashboard"
 	"github.com/Wigata-Intech/kay/internal/fleet"
 	"github.com/Wigata-Intech/kay/internal/keys"
-	"github.com/Wigata-Intech/kay/internal/sshx"
 	"github.com/Wigata-Intech/kay/internal/tui"
 
+	sshx "github.com/Wigata-Intech/w-tools/x/sshx"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
 
@@ -31,6 +34,31 @@ var (
 	commit  = ""
 	date    = ""
 )
+
+// Test seams: process-level effects and terminal reads injected so the
+// dispatch and prompt paths are coverable without a TTY or a real exit.
+var (
+	exit                   = os.Exit
+	stdinReader  io.Reader = os.Stdin
+	stdinFile              = os.Stdin
+	readPassword           = term.ReadPassword
+	isTerminal             = term.IsTerminal
+	dashboardRun           = dashboard.Run
+	fleetRun               = fleet.Run
+	newScreen              = func() (uiScreen, error) { return tui.NewScreen() }
+	vcsStamp               = func() (rev, when string, ok bool) {
+		bi, _ := debug.ReadBuildInfo()
+		return stampFrom(bi)
+	}
+)
+
+// uiScreen is what fleetDrill needs from a terminal screen; *tui.Screen
+// satisfies it, and tests drive the drill loop with a fake.
+type uiScreen interface {
+	Size() (int, int)
+	Draw(lines []string)
+	Close()
+}
 
 // handler runs a subcommand over its remaining args.
 type handler func([]string) error
@@ -51,7 +79,8 @@ var handlers = map[string]handler{
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(2)
+		exit(2)
+		return
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -68,14 +97,15 @@ func main() {
 	h, ok := handlers[cmd]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "kay: unknown command %q\n", cmd)
-		os.Exit(1)
+		exit(1)
+		return
 	}
 	if err := h(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return // `-h`/`--help` on a subcommand: flag already printed its usage
 		}
 		fmt.Fprintln(os.Stderr, "kay: "+err.Error())
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -110,9 +140,10 @@ func cmdVersion() {
 // vcsStamp reads the VCS revision/time Go embeds during `go build` in a git
 // checkout, used when ldflags didn't supply commit/date. The revision is
 // shortened and marked "-dirty" when the working tree had uncommitted changes.
-func vcsStamp() (rev, when string, ok bool) {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+// stampFrom extracts the shortened, dirty-marked VCS stamp from build info,
+// tolerating a nil info (stripped binaries).
+func stampFrom(bi *debug.BuildInfo) (rev, when string, ok bool) {
+	if bi == nil {
 		return "", "", false
 	}
 	var dirty bool
@@ -357,22 +388,27 @@ func cmdInstall(args []string) error {
 
 	if *push {
 		fmt.Fprintf(os.Stderr, "Password for %s@%s: ", srv.User, srv.Host)
-		pw, rerr := term.ReadPassword(int(os.Stdin.Fd()))
+		pw, rerr := readPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
 		if rerr != nil {
 			return rerr
 		}
-		c, derr := sshx.Dial(sshx.DialOptions{
-			Addr: srv.Addr(), User: srv.User, Password: string(pw),
-			KnownHostsPath: st.KnownHostsPath(),
+		hostKey, herr := hostKeyPolicy(st, false)
+		if herr != nil {
+			return herr
+		}
+		c, derr := sshx.Dial(context.Background(), srv.Addr(), sshx.Config{
+			User:    srv.User,
+			Auth:    []ssh.AuthMethod{ssh.Password(string(pw))},
+			HostKey: hostKey,
 		})
 		if derr != nil {
-			return derr
+			return dialHint(derr, srv, "wrong password?")
 		}
 		defer c.Close()
 		cmd := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\\n' " +
 			shellQuote(pub) + " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-		out, cerr := c.Run(cmd)
+		out, cerr := c.CombinedOutput(context.Background(), cmd)
 		if cerr != nil {
 			return fmt.Errorf("install failed: %w: %s", cerr, strings.TrimSpace(out))
 		}
@@ -415,7 +451,7 @@ func cmdConnect(args []string) error {
 	}
 	defer client.Close()
 	fmt.Printf("connected to %s@%s — type 'exit' to leave\n", srv.User, srv.Addr())
-	return client.Shell()
+	return shell(client)
 }
 
 // ---- exec ----
@@ -444,7 +480,7 @@ func cmdExec(args []string) error {
 		return err
 	}
 	defer client.Close()
-	out, runErr := client.Run(remoteCmd)
+	out, runErr := client.CombinedOutput(context.Background(), remoteCmd)
 	fmt.Print(out)
 	if !strings.HasSuffix(out, "\n") && out != "" {
 		fmt.Println()
@@ -480,15 +516,21 @@ func cmdDashboard(args []string) error {
 	defer client.Close()
 	panels, saveLayout := overviewLayoutOpts(st)
 	opts := dashboard.Options{
-		Interval:   *interval,
-		Color:      *color,
-		ReadOnly:   *readonly,
-		Anonymize:  *anon || os.Getenv("KAY_DEMO") != "",
-		Redial:     func() (dashboard.Client, error) { return dial(st, srv, *insecure) },
+		Interval:  *interval,
+		Color:     *color,
+		ReadOnly:  *readonly,
+		Anonymize: *anon || os.Getenv("KAY_DEMO") != "",
+		Redial: func() (dashboard.Client, error) {
+			c, rerr := dial(st, srv, *insecure)
+			if rerr != nil {
+				return nil, rerr
+			}
+			return runner{c}, nil
+		},
 		Overview:   panels,
 		SaveLayout: saveLayout,
 	}
-	return dashboard.Run(client, *srv, opts)
+	return dashboardRun(runner{client}, *srv, opts)
 }
 
 // overviewLayoutOpts loads the saved Overview layout and returns a saver that
@@ -516,12 +558,18 @@ func cmdFleet(args []string) error {
 	if err != nil {
 		return err
 	}
+	hostKey, err := hostKeyPolicy(st, *insecure)
+	if err != nil {
+		return err
+	}
 	hosts := make([]fleet.Host, 0, len(st.Servers))
 	for i := range st.Servers {
 		srv := st.Servers[i] // copy so each closure binds its own server
 		hosts = append(hosts, fleet.Host{
 			Server: srv,
-			Dial:   func() (*sshx.Client, error) { return dial(st, &srv, *insecure) },
+			Dial: func(ctx context.Context) (*sshx.Client, error) {
+				return dialWith(ctx, st, &srv, hostKey)
+			},
 		})
 	}
 	fopts := fleet.Options{
@@ -530,8 +578,8 @@ func cmdFleet(args []string) error {
 		Anonymize: *anon || os.Getenv("KAY_DEMO") != "",
 	}
 	// Non-interactive: plain, no drill-in.
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return fleet.Run(hosts, fopts)
+	if !isTerminal(int(os.Stdin.Fd())) {
+		return fleetRun(hosts, fopts)
 	}
 	return fleetDrill(st, hosts, fopts, *readonly)
 }
@@ -543,7 +591,7 @@ func cmdFleet(args []string) error {
 // dashboard reuses the connection the fleet already established.
 func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, readOnly bool) error {
 	tui.SetColorMode(fopts.Color)
-	scr, err := tui.NewScreen()
+	scr, err := newScreen()
 	if err != nil {
 		return err
 	}
@@ -554,7 +602,7 @@ func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, readO
 
 	events := make(chan tui.Event, 16)
 	go func() {
-		r := tui.NewReader(os.Stdin)
+		r := tui.NewReader(stdinFile)
 		for {
 			ev, rerr := r.ReadEvent()
 			events <- ev
@@ -629,25 +677,6 @@ func cmdLs(_ []string) error {
 
 // ---- shared helpers ----
 
-// dial loads the server's key and opens a connection.
-func dial(st *config.Store, srv *config.Server, insecure bool) (*sshx.Client, error) {
-	k, err := st.FindKey(srv.KeyName)
-	if err != nil {
-		return nil, err
-	}
-	signer, err := keys.LoadSigner(k.PrivatePath)
-	if err != nil {
-		return nil, err
-	}
-	return sshx.Dial(sshx.DialOptions{
-		Addr:           srv.Addr(),
-		User:           srv.User,
-		Signer:         signer,
-		KnownHostsPath: st.KnownHostsPath(),
-		Insecure:       insecure,
-	})
-}
-
 // anonEnabled reports whether demo redaction is on (KAY_DEMO), used by the
 // listing commands to mask hosts, users, aliases, key names, and fingerprints.
 func anonEnabled() bool { return os.Getenv("KAY_DEMO") != "" }
@@ -674,7 +703,7 @@ func pickServer(st *config.Store, alias string) (*config.Server, error) {
 		fmt.Fprintf(os.Stderr, "  [%d] %s (%s@%s)\n", i+1, s.Alias, s.User, s.Host)
 	}
 	fmt.Fprint(os.Stderr, "> ")
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(stdinReader)
 	text, _ := reader.ReadString('\n')
 	n, err := strconv.Atoi(strings.TrimSpace(text))
 	if err != nil || n < 1 || n > len(st.Servers) {

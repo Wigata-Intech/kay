@@ -178,7 +178,7 @@ func (s *fakeScreen) draws() int { s.mu.Lock(); defer s.mu.Unlock(); return s.n 
 
 // startLoop runs m.loop in a goroutine and returns its channels plus a done
 // channel carrying the loop's exitApp result.
-func startLoop(m *model, scr screen, reset func()) (chan tui.Event, chan os.Signal, chan time.Time, <-chan bool) {
+func startLoop(m *model, scr Screen, reset func()) (chan tui.Event, chan os.Signal, chan time.Time, <-chan bool) {
 	ev := make(chan tui.Event)
 	sig := make(chan os.Signal)
 	tick := make(chan time.Time)

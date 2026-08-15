@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// Runner is the minimal SSH capability metrics needs (satisfied by *sshx.Client).
+// Runner is the minimal SSH capability metrics needs (satisfied by the
+// connection adapters in cmd/kay and internal/fleet).
 type Runner interface {
 	Run(cmd string) (string, error)
 }

@@ -8,16 +8,18 @@ refreshing terminal dashboard — for one host or a whole fleet. It is part of t
 **Camelot** family of tools.
 
 Read `README.md` for the user-facing tour and `ARCHITECTURE.md` for the package
-layering. Design notes live in `docs/technical-design/`.
+layering. Design notes are maintained outside this repository.
 
 ## Core principles (non-negotiable)
 
 - **Stdlib-first, minimal dependencies.** The ONLY third-party modules allowed
-  are `golang.org/x/crypto`, `golang.org/x/sys`, and `golang.org/x/term`.
+  are `golang.org/x/crypto`, `golang.org/x/sys`, `golang.org/x/term`, and
+  `github.com/Wigata-Intech/w-tools/x/sshx` (kay's own SSH layer, extracted;
+  maintainer-approved 2026-08-15).
   Do **not** add a new dependency (TUI framework, CLI framework, color library,
   etc.) without the maintainer's explicit sign-off — reach for the standard
   library or the in-repo `internal/tui` toolkit instead.
-- **KISS & DRY.** One SSH path (`internal/sshx`), one JSON store
+- **KISS & DRY.** One SSH path (`w-tools/x/sshx` + `cmd/kay/ssh.go` glue), one JSON store
   (`internal/config`), one TUI toolkit (`internal/tui`). Prefer the simplest
   change that solves the problem; don't over-engineer.
 - **Minimal blast radius.** Touch only what the task needs. No drive-by rewrites.
@@ -26,6 +28,10 @@ layering. Design notes live in `docs/technical-design/`.
   no telemetry. Never weaken these without explicit instruction.
 - **Root causes, not band-aids.** Senior-engineer standard. If a fix feels hacky,
   stop and implement the clean version.
+- **`go.mod` carries a patch-versioned floor** (`go 1.26.6`, never bare `go 1.26`)
+  so `govulncheck` analyzes the patched standard library — a bare minor once hid
+  a reachable stdlib CVE from the gate. Bump the patch when Go security releases
+  land (`make update-deps` + directive).
 
 ## Build, test & quality gate
 
@@ -67,14 +73,14 @@ internal/dashboard     interactive tabbed dashboard (built on internal/tui)
 internal/fleet         multi-host fleet overview (kay fleet)
 internal/keys          key generation + PEM I/O
 internal/metrics       remote metric collection + parsing
-internal/sshx          the single SSH client path (dial/run/shell, TOFU)
 internal/tui           minimal stdlib TUI toolkit (screen, keys, widgets)
 ```
 
-**Import rule:** the reusable library packages (`tui`, `sshx`, `metrics`) must
-stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
-`config`, or `cmd`. This keeps them extractable into a shared module later
-(see `ARCHITECTURE.md`). Don't introduce upward or cyclic imports.
+**Import rule:** the reusable library packages (`tui`, `metrics`) must stay
+UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
+`config`, or `cmd`. This keeps them extractable into a shared module later —
+the SSH layer already graduated that way into `w-tools/x/sshx` (see
+`ARCHITECTURE.md`). Don't introduce upward or cyclic imports.
 
 - Seams are interfaces: `metrics.Runner` and `dashboard.Client` both are just
   `Run(string) (string, error)`. Depend on those, not concrete SSH types.
@@ -101,6 +107,18 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
   (pkg.go.dev is public). No banner/restating noise — don't add a comment that
   repeats what the next line already says or that restates an obvious language
   fact (e.g. labelling a `_test` file "black-box"; the package clause says so).
+- **Test structure (three tiers):**
+  | You have | It goes | Named |
+  | -------- | ------- | ----- |
+  | Static bytes (keys, corpora, golden files) | `testdata/` | whatever the test reads |
+  | A rig/fake used by one package | beside the tests, in a `_test.go` file | for what it provides: `server_test.go`, `driver_test.go` |
+  | A rig shared by 2+ packages | `internal/<domain>test/` (`sshtest`, `dbtest`) | promoted on the second consumer, never speculatively |
+  | Tests needing real external services | same package | `<subject>_integration_test.go` **plus** `//go:build integration`; excluded from the default gate, run via a dedicated make target/CI job (add both with the first such test) |
+
+  Hermetic in-process rigs (fake SSH server, fake DB driver) are **not**
+  integration tests — they stay untagged in the normal suite; fast and
+  deterministic is their point. Never use `fixture/` (that concept is
+  `testdata/`) or a grab-bag `testutil/` (domain names keep rigs cohesive).
 - **Tests:** external **black-box** package (`foo_test`) by default so tests go
   through the exported API; use white-box (`package foo`) only when a test must
   reach unexported internals (e.g. `internal/dashboard`'s model/event loop) — and
@@ -135,7 +153,7 @@ stay UI- and app-agnostic — they import nothing from `dashboard`, `fleet`,
 - `README.md` — user docs · `ARCHITECTURE.md` — layering · `SECURITY.md` — model
 - `CONTRIBUTING.md` / `CODE_OF_CONDUCT.md` — contributor rules
 - `assets/` — demo pipeline (`demo.tape` / `blur.sh` → `demo.gif`); technical
-  design docs live in the Camelot vault (`../../docs/technical-design/`)
+  design docs are maintained outside this repository
 - `.github/workflows/` — `ci.yml` (gates) · `codeql.yml` (code scanning) · `release.yml` (GoReleaser)
 - `Makefile` — all dev commands · `.goreleaser.yaml` — release build
 

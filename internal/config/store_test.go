@@ -262,3 +262,98 @@ func TestOverviewPanelsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad(t *testing.T) {
+	t.Run("honours KAY_HOME", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("KAY_HOME", dir)
+		st, err := config.Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if st.KnownHostsPath() != filepath.Join(dir, "known_hosts") {
+			t.Errorf("known_hosts path = %q, want under %q", st.KnownHostsPath(), dir)
+		}
+	})
+
+	t.Run("resolves the user config dir", func(t *testing.T) {
+		t.Setenv("KAY_HOME", "")
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", "")
+		if _, err := config.Load(); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+	})
+
+	t.Run("fails when no config dir resolves", func(t *testing.T) {
+		t.Setenv("KAY_HOME", "")
+		t.Setenv("HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		if _, err := config.Load(); err == nil {
+			t.Error("load error = nil, want config-dir failure")
+		}
+	})
+}
+
+func TestLoadFromErrors(t *testing.T) {
+	t.Run("keys dir blocked by a file", func(t *testing.T) {
+		dir := t.TempDir()
+		blocked := filepath.Join(dir, "store")
+		if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := config.LoadFrom(blocked); err == nil {
+			t.Error("LoadFrom error = nil, want mkdir failure")
+		}
+	})
+
+	t.Run("unreadable config file", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "config.json"), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if _, err := config.LoadFrom(dir); err == nil {
+			t.Error("LoadFrom error = nil, want read failure")
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{not json"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := config.LoadFrom(dir); err == nil {
+			t.Error("LoadFrom error = nil, want parse failure")
+		}
+	})
+}
+
+func TestSaveErrors(t *testing.T) {
+	t.Run("temp file blocked by a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		st, err := config.LoadFrom(dir)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "config.json.tmp"), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := st.Save(); err == nil {
+			t.Error("save error = nil, want temp-write failure")
+		}
+	})
+
+	t.Run("target blocked by a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		st, err := config.LoadFrom(dir)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "config.json"), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := st.Save(); err == nil {
+			t.Error("save error = nil, want rename failure")
+		}
+	})
+}

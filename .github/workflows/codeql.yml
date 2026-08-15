@@ -3,7 +3,7 @@ name: "CodeQL Advanced"
 # Advanced setup (replaces GitHub default setup) so we can carry the
 # query-filter in .github/codeql/codeql-config.yml. Mirrors GitHub's official
 # "CodeQL Advanced" template: same actions + go matrix and query suite, plus
-# our config-file. See that config for the one excluded query and its rationale.
+# our config-file (kept as the anchor for any future tuning).
 
 on:
   push:

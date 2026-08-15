@@ -1,20 +1,17 @@
-// Package keys generates and encodes SSH key pairs (ed25519 or RSA) using only
-// the standard library plus golang.org/x/crypto/ssh for SSH wire encoding.
+// Package keys stores kay's SSH key pairs on disk and loads them for auth.
+// Generation and parsing are delegated to w-tools/x/sshx/keys; this package
+// keeps only what is kay's own: file layout, permissions, and the terminal
+// passphrase prompt.
 package keys
 
 import (
-	"crypto"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/rsa"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/Wigata-Intech/kay/internal/config"
 
+	wkeys "github.com/Wigata-Intech/w-tools/x/sshx/keys"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
@@ -29,45 +26,26 @@ type Pair struct {
 
 // Generate creates a new key pair. For RSA, bits defaults to 3072 when <=0.
 func Generate(t config.KeyType, bits int, comment string) (*Pair, error) {
-	var privKey crypto.PrivateKey
-	var pubKey crypto.PublicKey
-
+	var alg wkeys.Algorithm
 	switch t {
 	case config.KeyEd25519:
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			return nil, err
-		}
-		privKey, pubKey = priv, pub
+		alg = wkeys.Ed25519
 	case config.KeyRSA:
-		if bits <= 0 {
-			bits = 3072
+		alg = wkeys.RSA
+		if bits < 0 {
+			bits = 0 // library default (3072)
 		}
-		if bits < 2048 {
-			return nil, fmt.Errorf("rsa key size %d too small; use at least 2048", bits)
-		}
-		priv, err := rsa.GenerateKey(rand.Reader, bits)
-		if err != nil {
-			return nil, err
-		}
-		privKey, pubKey = priv, priv.Public()
 	default:
 		return nil, fmt.Errorf("unsupported key type %q", t)
 	}
-
-	block, err := ssh.MarshalPrivateKey(privKey, comment)
+	p, err := wkeys.Generate(alg, bits, comment)
 	if err != nil {
-		return nil, fmt.Errorf("encode private key: %w", err)
+		return nil, err
 	}
-	sshPub, err := ssh.NewPublicKey(pubKey)
-	if err != nil {
-		return nil, fmt.Errorf("encode public key: %w", err)
-	}
-
 	return &Pair{
-		PrivatePEM:  pem.EncodeToMemory(block),
-		PublicAuth:  ssh.MarshalAuthorizedKey(sshPub),
-		Fingerprint: ssh.FingerprintSHA256(sshPub),
+		PrivatePEM:  p.PrivatePEM,
+		PublicAuth:  p.PublicAuthorized,
+		Fingerprint: p.Fingerprint,
 	}, nil
 }
 
@@ -94,32 +72,11 @@ func (p *Pair) Write(dir, name string) (privPath, pubPath string, err error) {
 // LoadSigner reads a private key PEM file and returns an ssh.Signer for auth.
 // If the key is passphrase-protected it prompts for the passphrase (no echo).
 func LoadSigner(privPath string) (ssh.Signer, error) {
-	data, err := os.ReadFile(privPath) //#nosec G304 -- path comes from kay's own key store, not untrusted input
+	signer, err := wkeys.Load(privPath, func(path string) ([]byte, error) {
+		return promptPassphrase(filepath.Base(path))
+	})
 	if err != nil {
-		return nil, err
-	}
-	return parseSigner(data, privPath, promptPassphrase)
-}
-
-// parseSigner turns key bytes into a signer, calling prompt for a passphrase only
-// when the key is encrypted. The prompt is injected so the encrypted-key path is
-// testable without a real terminal.
-func parseSigner(data []byte, name string, prompt func(string) ([]byte, error)) (ssh.Signer, error) {
-	signer, err := ssh.ParsePrivateKey(data)
-	if err == nil {
-		return signer, nil
-	}
-	var missing *ssh.PassphraseMissingError
-	if !errors.As(err, &missing) {
-		return nil, fmt.Errorf("parse private key %s: %w", name, err)
-	}
-	pass, perr := prompt(filepath.Base(name))
-	if perr != nil {
-		return nil, perr
-	}
-	signer, err = ssh.ParsePrivateKeyWithPassphrase(data, pass)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt private key %s: %w", name, err)
+		return nil, fmt.Errorf("load key %s: %w", privPath, err)
 	}
 	return signer, nil
 }

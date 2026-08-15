@@ -60,8 +60,10 @@ func TestGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load signer: %v", err)
 			}
-			got := ssh.MarshalAuthorizedKey(signer.PublicKey())
-			if strings.TrimSpace(string(got)) != strings.TrimSpace(string(pair.PublicAuth)) {
+			got := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+			// PublicAuth carries the comment after the key blob (ssh-keygen
+			// convention), so compare the key material as a prefix.
+			if !strings.HasPrefix(strings.TrimSpace(string(pair.PublicAuth)), got) {
 				t.Errorf("signer public key does not match generated public key")
 			}
 			if _, err := keys.ReadPublic(pubPath); err != nil {

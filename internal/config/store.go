@@ -144,10 +144,8 @@ func LoadFrom(dir string) (*Store, error) {
 // place on the next save without touching existing keys or servers.
 func (s *Store) Save() error {
 	s.Version = CurrentVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
+	// A Store is plain data; MarshalIndent cannot fail on it.
+	data, _ := json.MarshalIndent(s, "", "  ")
 	data = append(data, '\n')
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {

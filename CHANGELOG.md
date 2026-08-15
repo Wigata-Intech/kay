@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-15
+
+### Changed
+
+- The SSH layer now comes from [`w-tools/x/sshx`](https://github.com/Wigata-Intech/w-tools/tree/main/x/sshx) — the module extracted from this repo's `internal/sshx`, hardened upstream with 100% test coverage, fuzzing, and context-based cancellation. kay keeps only its glue: the TOFU terminal prompt, the passphrase prompt, and raw-mode shell wiring. `internal/sshx` and most of `internal/keys` are gone (−1,684 lines, tests included).
+- Key names are validated at generation: a name containing newlines or leading/ trailing whitespace is refused, since the name now travels on the `authorized_keys` line as the key comment.
+- Generated public keys now carry the key's comment on the `authorized_keys` line (standard `ssh-keygen` behavior; previously the comment was only embedded in the private key).
+- `go.mod` declares `go 1.26.6` so vulnerability scanning analyzes the patched standard library.
+
+### Added
+
+- `kay connect` now propagates terminal resizes to the remote PTY (SIGWINCH →
+  window-change), so full-screen programs like `htop` and `vim` redraw
+  correctly after you resize your terminal. Unix only; other platforms keep
+  the size negotiated at session start.
+
+### Fixed
+
+- Inherited from the extracted module: a cancelled or black-holed connection can no longer strand an in-flight command indefinitely (the keepalive now closes dead transports); a failure on an already-replaced fleet connection can no longer tear down its healthy successor; fleet reconnect state changes always carry the driving error.
+
 ## [0.2.0] - 2026-07-02
 
 A major dashboard and fleet release. Fleet now keeps one persistent, self-healing
@@ -236,7 +256,8 @@ Initial release.
 - Public-key authentication only (password used solely for assisted install);
   no telemetry.
 
-[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Wigata-Intech/kay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Wigata-Intech/kay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Wigata-Intech/kay/compare/v0.1.0...v0.1.1

@@ -5,6 +5,7 @@
 package fleet
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -12,16 +13,17 @@ import (
 
 	"github.com/Wigata-Intech/kay/internal/config"
 	"github.com/Wigata-Intech/kay/internal/metrics"
-	"github.com/Wigata-Intech/kay/internal/sshx"
 	"github.com/Wigata-Intech/kay/internal/tui"
 
+	sshx "github.com/Wigata-Intech/w-tools/x/sshx"
 	"golang.org/x/term"
 )
 
-// Host is a server plus a function that opens a connection to it.
+// Host is a server plus a function that opens a connection to it. The ctx is
+// the pooled connection's lifetime: it is canceled when the session closes.
 type Host struct {
 	Server config.Server
-	Dial   func() (*sshx.Client, error)
+	Dial   func(ctx context.Context) (*sshx.Client, error)
 }
 
 // Options configures the fleet view.
@@ -37,9 +39,9 @@ type hostState struct {
 	ok   bool
 }
 
-// screen is the subset of *tui.Screen the fleet loop needs. It is an interface
-// so loop can be driven in tests without owning a real terminal.
-type screen interface {
+// Screen is the subset of *tui.Screen the fleet loop needs. It is an
+// interface so views can be driven in tests without owning a real terminal.
+type Screen interface {
 	Size() (int, int)
 	Draw(lines []string)
 }
@@ -52,14 +54,24 @@ type hostUpdate struct {
 }
 
 // collector is the per-host capability the fleet needs: run a command (to
-// collect metrics) and report connection state. *sshx.Managed satisfies it, so
-// the fleet reuses one persistent connection per host instead of dialing every
-// tick. It is an interface so the loop can be driven in tests with fakes.
+// collect metrics) and report connection state. managedConn satisfies it over
+// a pooled connection, so the fleet reuses one persistent connection per host
+// instead of dialing every tick. It is an interface so the loop can be driven
+// in tests with fakes.
 type collector interface {
 	metrics.Runner
-	State() sshx.ConnState
+	State() sshx.State
 	Err() error
 }
+
+// managedConn adapts a pooled self-healing connection to the collector seam.
+type managedConn struct{ m *sshx.Managed }
+
+func (c managedConn) Run(cmd string) (string, error) {
+	return c.m.CombinedOutput(context.Background(), cmd)
+}
+func (c managedConn) State() sshx.State { return c.m.State() }
+func (c managedConn) Err() error        { return c.m.Err() }
 
 // fleetView holds the mutable state of a running fleet overview.
 type fleetView struct {
@@ -153,7 +165,7 @@ func NewSession(hosts []Host) *Session {
 	pool := sshx.NewPool(dialCap)
 	conns := make([]collector, len(hosts))
 	for i := range hosts {
-		conns[i] = pool.Add(hosts[i].Dial)
+		conns[i] = managedConn{pool.Add(sshx.ManagedConfig{Dial: hosts[i].Dial})}
 	}
 	return &Session{hosts: hosts, conns: conns, pool: pool}
 }
@@ -165,7 +177,7 @@ func (s *Session) Close() { s.pool.Close() }
 // input channel, reusing the session's persistent connections. It returns the
 // host the user selected with Enter (with its live connection to reuse), or nil
 // when they quit.
-func (s *Session) RunView(scr *tui.Screen, events <-chan tui.Event, opts Options) (*Selection, error) {
+func (s *Session) RunView(scr Screen, events <-chan tui.Event, opts Options) (*Selection, error) {
 	if opts.Interval <= 0 {
 		opts.Interval = 5 * time.Second
 	}
@@ -204,7 +216,7 @@ func (v *fleetView) trigger() {
 // and returns when the user quits (nil) or drills into a host (the selection).
 // Per-host results stream in independently. The screen, input, and tick sources
 // are injected so it can run headless in tests.
-func (v *fleetView) loop(scr screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Selection {
+func (v *fleetView) loop(scr Screen, events <-chan tui.Event, tick <-chan time.Time, ticker *time.Ticker) *Selection {
 	draw := func() {
 		w, h := scr.Size()
 		if v.help {
@@ -304,8 +316,12 @@ func collect(c collector) hostState {
 			return hostState{err: err}
 		}
 		return hostState{snap: s, ok: true}
-	case sshx.StateBroken:
-		return hostState{err: c.Err()}
+	case sshx.StateBroken, sshx.StateClosed:
+		err := c.Err()
+		if err == nil {
+			err = sshx.ErrClosed
+		}
+		return hostState{err: err}
 	default:
 		return hostState{} // connecting: no data, no error yet
 	}

@@ -15,9 +15,11 @@ refreshing metrics dashboard — for one host or your whole fleet.
 
 ![kay dashboard demo](assets/demo.gif)
 
-Built with the Go standard library plus the `golang.org/x` `crypto`, `term`, and
-`sys` packages (the only third-party dependencies). Design: KISS, DRY —
-one SSH path, one JSON store, a small in-repo TUI toolkit instead of a framework.
+Built with the Go standard library, the `golang.org/x` `crypto`, `term`, and
+`sys` packages, and [`w-tools/x/sshx`](https://github.com/Wigata-Intech/w-tools/tree/main/x/sshx)
+(kay's own SSH layer, extracted and hardened — the only dependencies). Design:
+KISS, DRY — one SSH path, one JSON store, a small in-repo TUI toolkit instead
+of a framework.
 
 Part of the **Camelot** tools.
 
@@ -33,7 +35,7 @@ Part of the **Camelot** tools.
 - **Fleet view.** `kay fleet` shows one live row per registered host.
 - **Safe by default.** Public-key auth only, host keys pinned on first use,
   destructive actions confirmed, keys and config stored `0600`, no telemetry.
-- **Tiny and auditable.** Stdlib + `x/crypto`, `x/term`, `x/sys`, KISS/DRY throughout.
+- **Tiny and auditable.** Stdlib + `x/crypto`, `x/term`, `x/sys`, and `w-tools/x/sshx`; KISS/DRY throughout.
 
 ## Quick Setup
 
@@ -74,11 +76,11 @@ remote box? See [Verifying locally](#verifying-locally-with-your-own-sshd).
 
 ## Build
 
-The first build needs network access to fetch `x/crypto` (and `x/sys`,
-`x/term`):
+The first build needs network access to fetch the dependencies
+(`w-tools/x/sshx`, `x/crypto`, `x/sys`, `x/term`):
 
 ```sh
-go mod tidy        # resolves and pins x/crypto, x/sys, x/term; writes go.sum
+go mod tidy        # resolves and pins the dependencies; writes go.sum
 go build -o kay ./cmd/kay
 ```
 
@@ -222,7 +224,6 @@ internal/dashboard         interactive tabbed dashboard built on internal/tui
 internal/fleet             multi-host fleet overview (kay fleet)
 internal/keys              key generation + PEM I/O
 internal/metrics           remote metric collection + parsing
-internal/sshx              the single SSH client path (dial/run/shell, TOFU)
 internal/tui               minimal stdlib TUI toolkit (screen, keys, widgets)
 ```
 
@@ -233,8 +234,9 @@ richer UI, it can be swapped for a library like `tview` or Bubble Tea with
 changes confined to the `dashboard` package.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the package layering and how the
-reusable packages (`tui`, `sshx`, `metrics`) are structured for easy future
-extraction into a shared module.
+reusable packages (`tui`, `metrics`) are structured for easy future
+extraction into a shared module — the SSH layer already made that jump: kay
+runs on [`w-tools/x/sshx`](https://github.com/Wigata-Intech/w-tools/tree/main/x/sshx).
 
 ## Goals, Capabilities & Scope
 
@@ -294,7 +296,7 @@ standard tools.
 | Assisted key install over an existing connection | ✅ Done | `install --push` (password bootstrap) |
 | Per-pane titles on two-column Overview | ✅ Done | System \| Top processes |
 | Multi-server fleet overview (one row per host) | ✅ Done | `kay fleet` — concurrent multi-host live table |
-| Persistent, self-healing fleet SSH connections | ✅ Done | v0.2 — one long-lived connection per host (`sshx.Pool`/`Managed`); reuse, backoff+jitter, dial cap, zero-handshake drill-in |
+| Persistent, self-healing fleet SSH connections | ✅ Done | v0.2 — one long-lived connection per host; reuse, backoff+jitter, dial cap, zero-handshake drill-in; now powered by `w-tools/x/sshx` |
 | Customisable Overview (reorder / hide panels) | ✅ Done | v0.2 — `o` in the Overview tab; layout persists in `config.json` (`ui` section, schema `version`) |
 | Richer Overview (docker health counts, sparklines) | ✅ Done | More than gauges |
 | Demo/anonymize mode (`--anonymize` / `KAY_DEMO`) | ✅ Done | Masks host/user/alias/Docker names for screenshots |
