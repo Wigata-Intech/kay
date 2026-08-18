@@ -69,11 +69,21 @@ func (p *Pair) Write(dir, name string) (privPath, pubPath string, err error) {
 	return privPath, pubPath, nil
 }
 
+// PassphraseFunc supplies the passphrase for an encrypted key, given the
+// key file's base name.
+type PassphraseFunc func(name string) ([]byte, error)
+
 // LoadSigner reads a private key PEM file and returns an ssh.Signer for auth.
-// If the key is passphrase-protected it prompts for the passphrase (no echo).
+// If the key is passphrase-protected it prompts on the terminal (no echo).
 func LoadSigner(privPath string) (ssh.Signer, error) {
+	return LoadSignerWith(privPath, promptPassphrase)
+}
+
+// LoadSignerWith is LoadSigner with the passphrase prompt injected — the
+// console supplies a masked modal, the CLI keeps the terminal prompt.
+func LoadSignerWith(privPath string, prompt PassphraseFunc) (ssh.Signer, error) {
 	signer, err := wkeys.Load(privPath, func(path string) ([]byte, error) {
-		return promptPassphrase(filepath.Base(path))
+		return prompt(filepath.Base(path))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load key %s: %w", privPath, err)

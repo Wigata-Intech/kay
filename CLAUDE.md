@@ -66,8 +66,9 @@ direction before implementing.
 
 ## Architecture & layering
 
-```
+```text
 cmd/kay/main.go        entrypoint + flag-based subcommands (keep THIN)
+internal/app           interactive console: view-stack router behind bare `kay`
 internal/config        JSON store (keys, servers)
 internal/dashboard     interactive tabbed dashboard (built on internal/tui)
 internal/fleet         multi-host fleet overview (kay fleet)
@@ -108,6 +109,7 @@ the SSH layer already graduated that way into `w-tools/x/sshx` (see
   repeats what the next line already says or that restates an obvious language
   fact (e.g. labelling a `_test` file "black-box"; the package clause says so).
 - **Test structure (three tiers):**
+
   | You have | It goes | Named |
   | -------- | ------- | ----- |
   | Static bytes (keys, corpora, golden files) | `testdata/` | whatever the test reads |

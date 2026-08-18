@@ -27,6 +27,9 @@ Part of the **Camelot** tools.
 
 - **One binary, no agent.** Everything runs from your machine over plain SSH;
   nothing is installed on the servers.
+- **A full console.** Bare `kay` on a terminal opens a vim-keyed console:
+  the live fleet as home, dashboards, shells, remote commands, and server/key
+  management all inside one screen.
 - **Full loop in four commands:** generate a key → register a server → install
   the key → open a live dashboard.
 - **Live terminal dashboard.** Tabbed, colour, refreshing: CPU, memory, disk,
@@ -67,6 +70,28 @@ kay ls                                     # everything you've registered
 Omitting `--alias` on `connect`, `exec`, or `dashboard` lets you pick a server
 from a numbered list. `kay help` lists every command. Want to try it without a
 remote box? See [Verifying locally](#verifying-locally-with-your-own-sshd).
+
+## The console
+
+Run `kay` with no arguments on a terminal and the whole lifecycle lives in one
+screen (piped/scripted `kay` still prints usage, and every flag command above
+keeps working unchanged). The home view is the live fleet — one row per host
+over persistent, self-healing connections — and everything hangs off it:
+
+| Key | Action |
+| --- | ------ |
+| `j`/`k`, `g`/`G` | select host / jump |
+| `Enter` | open the host's dashboard (same connection, zero re-handshake); `q` returns |
+| `c` | connect: a real SSH shell; `exit` drops you back into the console |
+| `x` | run a command on the host, output in a scrollable pager |
+| `a` / `e` / `d` | add / edit / delete a server (the fleet reconnects to match) |
+| `i` | install the server's key — view the manual command or push it over a password login |
+| `K` | manage keys: generate, show public key, delete |
+| `?` | help overlay · `q` quit |
+
+Host-trust (TOFU) confirmations and key passphrases appear as modals — even
+when a background reconnect raises them. With an empty config the console
+walks you through the first key and server.
 
 ## Prerequisite
 
@@ -119,7 +144,7 @@ The dashboard is a full-screen, tabbed terminal UI with colour gauges, a moving
 cursor, and guarded actions. It runs in the terminal's alternate screen, so it
 never pollutes your scrollback and restores your previous view on exit.
 
-```
+```text
 Tabs    : Tab / Shift-Tab · [ / ] · H / L · or 1-5   → Overview · Processes · Docker · Network · Disk
 Global  : r refresh now · +/- change interval · ? help (full keymap) · q quit
 List    : ↑↓ or j/k select · PgUp/PgDn or ^U/^D page · g/G top/bottom · Enter details/inspect
@@ -217,8 +242,9 @@ mkdir -p ~/.ssh && ./kay key show --name local >> ~/.ssh/authorized_keys && chmo
 
 ## Project Structure
 
-```
+```text
 cmd/kay/main.go            entrypoint + subcommands
+internal/app               interactive console (bare `kay` on a terminal)
 internal/config            JSON store (keys, servers)
 internal/dashboard         interactive tabbed dashboard built on internal/tui
 internal/fleet             multi-host fleet overview (kay fleet)
@@ -277,7 +303,7 @@ standard tools.
 ### Roadmap
 
 | Item | Status | Notes |
-|------|--------|-------|
+| ---- | ------ | ----- |
 | Key management, server registry, install, connect, exec | ✅ Done | Core CLI |
 | Interactive tabbed dashboard (Overview / Processes / Docker / Network) | ✅ Done | Colour, cursor, guarded actions |
 | Windowed framed-pane layout | ✅ Done | Header bar + titled pane |
@@ -308,8 +334,9 @@ standard tools.
 | Tech debt: interface/type cleanups (`Runner`/`Client`, `List`/pager) | ✅ Done | v0.1.2 — `Client`=`metrics.Runner`; `List`/`Pager` split |
 | Disk explorer (`du` drill-down of what's using space) | ✅ Done | v0.2 — Enter a mount in the Disk tab to walk directories by size |
 | Fleet drill-in (open a host's dashboard from fleet) | ✅ Done | v0.2 — Enter a host in `kay fleet`; seamless shared-terminal handoff |
-| Customizable Overview (pinned panels) | 🚧 v0.2 | Layout config in the store |
+| Customizable Overview (pinned panels) | ✅ Done | v0.2 — layout persists in `config.json`; see the reorder/hide row |
 | Top-N containers by CPU/MEM (`docker stats`) | ✅ Done | v0.2 — `t` in the Docker tab; on-demand overlay, sort by CPU/MEM |
+| Full-TUI console (manage keys/servers/install/exec/connect inside one screen) | ✅ Done | Bare `kay` opens the fleet-backed console — dashboards, shells (`c`), remote commands (`x`), server/key management, key install, TOFU/passphrase modals; see [The console](#the-console) |
 | Agentic DevOps/SRE integration | 💡 Idea | Expose metrics + guarded actions as a structured tool/API so an AI agent can observe and remediate — deploy, restart/roll back, set/rotate env vars, run runbooks — gated by confirmations, `--read-only`, and an audit log |
 
 ## Security

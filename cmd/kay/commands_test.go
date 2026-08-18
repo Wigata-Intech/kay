@@ -938,12 +938,14 @@ type fakeScreen struct {
 	mu           sync.Mutex
 	draws        int
 	sawDashboard bool
+	lines        []string
 }
 
 func (f *fakeScreen) Size() (int, int) { return 100, 30 }
 func (f *fakeScreen) Draw(lines []string) {
 	f.mu.Lock()
 	f.draws++
+	f.lines = append(f.lines, lines...)
 	for _, l := range lines {
 		if strings.Contains(l, "Overview") {
 			f.sawDashboard = true // the tab bar renders only inside a dashboard
@@ -957,6 +959,18 @@ func (f *fakeScreen) dashboardSeen() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sawDashboard
+}
+
+// saw reports whether any drawn line contained s.
+func (f *fakeScreen) saw(s string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range f.lines {
+		if strings.Contains(l, s) {
+			return true
+		}
+	}
+	return false
 }
 
 type stdinStep struct {

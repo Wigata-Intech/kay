@@ -74,9 +74,14 @@ func TestStoreValidation(t *testing.T) {
 		{"duplicate alias", func() error {
 			return st.AddServer(config.Server{Alias: "a", KeyName: "k"})
 		}, true},
+		// error: a referenced key cannot be removed while its server exists
+		{"remove referenced key", func() error { return st.RemoveKey("k") }, true},
 		// positive then error: remove the server, then removing again fails
 		{"remove server", func() error { return st.RemoveServer("a") }, false},
 		{"remove missing server", func() error { return st.RemoveServer("a") }, true},
+		// positive then error: with the server gone the key removes, once
+		{"remove key", func() error { return st.RemoveKey("k") }, false},
+		{"remove missing key", func() error { return st.RemoveKey("k") }, true},
 	}
 	for _, tt := range steps {
 		t.Run(tt.name, func(t *testing.T) {

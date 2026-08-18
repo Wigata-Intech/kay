@@ -6,8 +6,8 @@
 #   go build -o kay ./cmd/kay
 #   vhs assets/demo.tape
 #
-# Tweak the alias below to one of your registered servers. The window is sized
-# wide enough (~160 cols) to show the Overview's three-column responsive layout.
+# The window is sized wide enough (~160 cols) to show the Overview's
+# three-column responsive layout.
 
 Output assets/demo.gif
 
@@ -27,20 +27,20 @@ Enter
 Sleep 3s
 Show
 
-# --- intro: what's registered ---
-Type "./kay ls"
-Enter
-Sleep 2s
-
-# --- launch the dashboard: responsive multi-column Overview ---
-Type "./kay dashboard --alias dev-do --interval 2s"
+# --- the console: bare `kay` opens the live fleet as home ---
+Type "./kay"
 Enter
 Sleep 5s
 
-# discover the keybindings overlay
+# discover the full key map
 Type "?"
 Sleep 3s
 Space
+Sleep 1s
+
+# drill into the selected host's dashboard (same connection, no re-handshake)
+Enter
+Sleep 5s
 
 # customise the Overview panels (reorder / hide), then cancel
 Type "o"
@@ -50,7 +50,7 @@ Sleep 1s
 Escape
 Sleep 1s
 
-# tab through the views
+# tab through the dashboard views
 Type "2"
 Sleep 2s
 Type "3"
@@ -62,15 +62,26 @@ Sleep 2s
 Type "1"
 Sleep 2s
 
+# back to the fleet home
 Type "q"
+Sleep 2s
+
+# run a command on the host without leaving the console
+Type "x"
+Sleep 1s
+Type "uptime"
+Sleep 1s
+Enter
+Sleep 3s
+Escape
 Sleep 1s
 
-# --- fleet overview + its help ---
-Type "./kay fleet"
-Enter
-Sleep 4s
-Type "?"
-Sleep 2s
-Space
+# manage keys from the same screen
+Type "K"
+Sleep 3s
+Escape
+Sleep 1s
+
+# leave the console
 Type "q"
 Sleep 1s

@@ -386,7 +386,7 @@ func TestShellWith(t *testing.T) {
 		defer func() { _ = c.Close() }()
 
 		f := &fakeTerm{isTTY: false}
-		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t)); err != nil {
+		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t), devNull(t)); err != nil {
 			t.Fatalf("shellWith() error = %v", err)
 		}
 		if f.madeRaw {
@@ -409,7 +409,7 @@ func TestShellWith(t *testing.T) {
 
 		t.Setenv("TERM", "vt220")
 		f := &fakeTerm{isTTY: true, w: 120, h: 40}
-		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t)); err != nil {
+		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t), devNull(t)); err != nil {
 			t.Fatalf("shellWith() error = %v", err)
 		}
 		if !f.madeRaw || !f.restored {
@@ -436,7 +436,7 @@ func TestShellWith(t *testing.T) {
 		defer func() { _ = c.Close() }()
 
 		f := &fakeTerm{isTTY: true, sizeErr: errSizeFailed}
-		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t)); err != nil {
+		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t), devNull(t)); err != nil {
 			t.Fatalf("shellWith() error = %v", err)
 		}
 		waitFor(t, 2*time.Second, func() bool {
@@ -453,7 +453,7 @@ func TestShellWith(t *testing.T) {
 		c := newClient(t)
 		_ = c.Close()
 		f := &fakeTerm{isTTY: false}
-		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t)); !errors.Is(err, sshx.ErrClosed) {
+		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t), devNull(t)); !errors.Is(err, sshx.ErrClosed) {
 			t.Errorf("shellWith() error = %v, want ErrClosed", err)
 		}
 	})
@@ -462,7 +462,7 @@ func TestShellWith(t *testing.T) {
 		c := newClient(t)
 		rawErr := errors.New("raw failed")
 		f := &fakeTerm{isTTY: true, rawErr: rawErr}
-		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t)); !errors.Is(err, rawErr) {
+		if err := shellWith(c, f, devNull(t), devNull(t), devNull(t), devNull(t)); !errors.Is(err, rawErr) {
 			t.Errorf("shellWith() error = %v, want the raw-mode failure", err)
 		}
 		if f.restored {

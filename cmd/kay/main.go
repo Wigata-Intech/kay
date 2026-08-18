@@ -78,6 +78,15 @@ var handlers = map[string]handler{
 
 func main() {
 	if len(os.Args) < 2 {
+		// Interactive terminal: open the console. Pipes and scripts keep the
+		// usage-and-exit contract unchanged.
+		if isTerminal(int(os.Stdin.Fd())) {
+			if err := runConsole(); err != nil {
+				fmt.Fprintln(os.Stderr, "kay: "+err.Error())
+				exit(1)
+			}
+			return
+		}
 		usage()
 		exit(2)
 		return
@@ -393,24 +402,8 @@ func cmdInstall(args []string) error {
 		if rerr != nil {
 			return rerr
 		}
-		hostKey, herr := hostKeyPolicy(st, false)
-		if herr != nil {
-			return herr
-		}
-		c, derr := sshx.Dial(context.Background(), srv.Addr(), sshx.Config{
-			User:    srv.User,
-			Auth:    []ssh.AuthMethod{ssh.Password(string(pw))},
-			HostKey: hostKey,
-		})
-		if derr != nil {
-			return dialHint(derr, srv, "wrong password?")
-		}
-		defer c.Close()
-		cmd := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\\n' " +
-			shellQuote(pub) + " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-		out, cerr := c.CombinedOutput(context.Background(), cmd)
-		if cerr != nil {
-			return fmt.Errorf("install failed: %w: %s", cerr, strings.TrimSpace(out))
+		if err := pushKey(st, srv, pub, string(pw)); err != nil {
+			return err
 		}
 		fmt.Printf("installed key %q on %s — verify with: kay connect --alias %s\n",
 			srv.KeyName, srv.Alias, srv.Alias)
@@ -425,6 +418,32 @@ func cmdInstall(args []string) error {
 
 Then verify with:  kay connect --alias %s
 `, srv.User, srv.Host, pub, srv.Alias)
+	return nil
+}
+
+// pushKey installs the authorized_keys line on the server over a password
+// login, using kay's host-key policy. Shared by `install --push` and the
+// console's install screen.
+func pushKey(st *config.Store, srv *config.Server, pub, password string) error {
+	hostKey, err := hostKeyPolicy(st, false)
+	if err != nil {
+		return err
+	}
+	c, err := sshx.Dial(context.Background(), srv.Addr(), sshx.Config{
+		User:    srv.User,
+		Auth:    []ssh.AuthMethod{ssh.Password(password)},
+		HostKey: hostKey,
+	})
+	if err != nil {
+		return dialHint(err, srv, "wrong password?")
+	}
+	defer c.Close()
+	cmd := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\\n' " +
+		shellQuote(pub) + " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+	out, cerr := c.CombinedOutput(context.Background(), cmd)
+	if cerr != nil {
+		return fmt.Errorf("install failed: %w: %s", cerr, strings.TrimSpace(out))
+	}
 	return nil
 }
 
@@ -562,16 +581,7 @@ func cmdFleet(args []string) error {
 	if err != nil {
 		return err
 	}
-	hosts := make([]fleet.Host, 0, len(st.Servers))
-	for i := range st.Servers {
-		srv := st.Servers[i] // copy so each closure binds its own server
-		hosts = append(hosts, fleet.Host{
-			Server: srv,
-			Dial: func(ctx context.Context) (*sshx.Client, error) {
-				return dialWith(ctx, st, &srv, hostKey)
-			},
-		})
-	}
+	hosts := fleetHosts(st, hostKey)
 	fopts := fleet.Options{
 		Interval:  *interval,
 		Color:     *color,
@@ -582,6 +592,134 @@ func cmdFleet(args []string) error {
 		return fleetRun(hosts, fopts)
 	}
 	return fleetDrill(st, hosts, fopts, *readonly)
+}
+
+// inputRouter owns process stdin for an interactive session: a single reader
+// goroutine feeds chunks that are either decoded into UI key events or, while
+// the console lends the terminal to an SSH shell, diverted raw to it — never
+// both, so the shell and the UI can't fight over keystrokes.
+type inputRouter struct {
+	events chan tui.Event
+	divert chan io.Writer
+	chunks chan []byte
+}
+
+func startInputRouter() *inputRouter {
+	r := &inputRouter{events: make(chan tui.Event, 16), divert: make(chan io.Writer), chunks: make(chan []byte, 16)}
+	in := stdinFile // captured once: the test seam may be restored while we run
+	go func() {     // the sole stdin reader
+		for {
+			buf := make([]byte, 1024)
+			n, err := in.Read(buf)
+			if n > 0 {
+				r.chunks <- buf[:n]
+			}
+			if err != nil {
+				close(r.chunks)
+				return
+			}
+		}
+	}()
+	go r.route()
+	return r
+}
+
+// route decodes chunks into events, or copies them raw while diverted. Event
+// delivery stays receptive to divert requests so a busy UI can never
+// deadlock the handoff, and every mode switch drops what was buffered for
+// the other side — keys typed ahead of a shell must not be injected into it,
+// and keys typed at a shell must not replay into the UI. Stdin ending
+// delivers a final quit event, like a reader error always has.
+func (r *inputRouter) route() {
+	var raw io.Writer
+	var pending []byte
+	for {
+		select {
+		case w := <-r.divert:
+			if w != nil {
+				r.drainChunks()
+			}
+			pending, raw = nil, w
+		case chunk, ok := <-r.chunks:
+			if !ok {
+				r.events <- tui.Event{Type: tui.EventQuit}
+				return
+			}
+			if raw != nil {
+				_, _ = raw.Write(chunk)
+				continue
+			}
+			pending = append(pending, chunk...)
+			for {
+				ev, n := tui.Decode(pending)
+				if n == 0 {
+					break
+				}
+				pending = pending[n:]
+				select {
+				case r.events <- ev:
+				case w := <-r.divert:
+					if w != nil {
+						r.drainChunks()
+					}
+					pending, raw = nil, w
+				}
+				if raw != nil {
+					break
+				}
+			}
+		}
+	}
+}
+
+// drainChunks drops chunks buffered for the UI when switching to a shell:
+// keystrokes typed ahead of the handoff must not be injected into it. The
+// reverse drop (stale events on the way back) runs caller-side in divertTo —
+// the UI goroutine owns event consumption, so only there is it race-free.
+func (r *inputRouter) drainChunks() {
+	for {
+		select {
+		case _, ok := <-r.chunks:
+			if !ok {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
+// divertTo routes raw stdin to w; nil returns input to the UI decoder,
+// dropping events decoded before or during the handoff so keys typed at the
+// shell can never replay into the UI.
+func (r *inputRouter) divertTo(w io.Writer) {
+	r.divert <- w
+	if w != nil {
+		return
+	}
+	for {
+		select {
+		case <-r.events:
+		default:
+			return
+		}
+	}
+}
+
+// fleetHosts wraps every stored server with a dial closure bound to the shared
+// host-key policy, ready for a fleet session.
+func fleetHosts(st *config.Store, hostKey ssh.HostKeyCallback) []fleet.Host {
+	hosts := make([]fleet.Host, 0, len(st.Servers))
+	for i := range st.Servers {
+		srv := st.Servers[i] // copy so each closure binds its own server
+		hosts = append(hosts, fleet.Host{
+			Server: srv,
+			Dial: func(ctx context.Context) (*sshx.Client, error) {
+				return dialWith(ctx, st, &srv, hostKey)
+			},
+		})
+	}
+	return hosts
 }
 
 // fleetDrill runs the interactive fleet overview with drill-in: it owns a single
@@ -600,17 +738,7 @@ func fleetDrill(st *config.Store, hosts []fleet.Host, fopts fleet.Options, readO
 	sess := fleet.NewSession(hosts)
 	defer sess.Close()
 
-	events := make(chan tui.Event, 16)
-	go func() {
-		r := tui.NewReader(stdinFile)
-		for {
-			ev, rerr := r.ReadEvent()
-			events <- ev
-			if rerr != nil {
-				return
-			}
-		}
-	}()
+	events := startInputRouter().events
 
 	for {
 		sel, err := sess.RunView(scr, events, fopts)

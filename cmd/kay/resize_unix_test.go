@@ -51,7 +51,7 @@ func TestShellWithResize(t *testing.T) {
 
 	f := &fakeTerm{isTTY: true, w: 150, h: 45}
 	done := make(chan error, 1)
-	go func() { done <- shellWith(c, f, stdinR, devNull(t), devNull(t)) }()
+	go func() { done <- shellWith(c, f, stdinR, stdinR, devNull(t), devNull(t)) }()
 
 	// The pty must exist before the resize means anything.
 	waitFor(t, 2*time.Second, func() bool { return len(server.ptyRecords()) > 0 })
@@ -102,7 +102,7 @@ func TestShellWithResizeSizeFailure(t *testing.T) {
 	// must be swallowed rather than sent with garbage.
 	f := &fakeTerm{isTTY: true, sizeErr: errSizeFailed}
 	done := make(chan error, 1)
-	go func() { done <- shellWith(c, f, stdinR, devNull(t), devNull(t)) }()
+	go func() { done <- shellWith(c, f, stdinR, stdinR, devNull(t), devNull(t)) }()
 
 	waitFor(t, 2*time.Second, func() bool { return len(server.ptyRecords()) > 0 })
 	before := f.getSizeCalls()

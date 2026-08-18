@@ -6,7 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-18
+
+The console release: bare `kay` on a terminal is now a full vim-keyed
+management console — the live fleet as home, with dashboards, real SSH
+shells, remote commands, and server/key management in one screen. Built in
+five phases with an end-to-end UX audit pass; the flag CLI is byte-identical
+throughout.
+
+### Added
+
+- Interactive console (phase 1): bare `kay` on a terminal now opens the fleet
+  overview as a live home view — `Enter` drills into a host's dashboard over
+  the pooled connection and back, exactly like `kay fleet`; with no servers
+  registered it shows a getting-started screen instead of an error. Piped or
+  scripted `kay` (no TTY) keeps printing usage, and every subcommand behaves
+  exactly as before.
+- Console management screens (phase 2): from the home view, `a` adds a
+  server, `e` edits and `d` deletes the highlighted one (the fleet reconnects
+  to match), and `K` opens the keys view — generate (`n`), show the public
+  key (`s`), and delete (`d`, refused while a server references the key; key
+  deletion is a console-only capability). Host-trust (TOFU) confirmations and
+  key passphrases now appear as console modals instead of garbled terminal
+  prompts — including for background reconnects; a declined host or canceled
+  passphrase is remembered for the session so reconnect retries don't nag.
+- Console connect (phase 3/4): `c` on a host hands the terminal to a real
+  SSH shell and returns to the console when it exits — the dial runs in the
+  background (the fleet stays responsive, trust prompts still surface), and
+  a single input router guarantees the shell and the console never fight
+  over keystrokes.
+- Console exec (`x`): run a command on the highlighted host over its pooled
+  connection, output in a scrollable pager; Enter reruns.
+- Console install (`i`): view the authorized_keys command for the server's
+  key, or push it now over a password login (masked prompt, async, result
+  modal) — sharing the exact install path `kay install --push` uses.
+- Console help: the `?` overlay documents the full console key map (including
+  Ctrl-C).
+- `internal/tui` gains `TextInput` (single-line editor with masked mode),
+  `Form` (labeled fields, focus cycling, validation messages), `Modal`
+  (centered overlay), and `StatusBar` — the console's building blocks.
+
 ### Changed
+
+- Console chrome redesigned after a UX audit against the k9s/lazygit craft
+  bar: one bottom bar everywhere (breadcrumb on the left, the current view's
+  handful of hints on the right) replaces per-view hint footers and redundant
+  headers; the home footer is a curated six hints plus `?` instead of an
+  overflowing thirteen; confirmations, host-trust prompts, and passphrase
+  modals now overlay the dimmed screen they interrupt instead of floating on
+  black; form labels align to a tight colon gutter with the focused field in
+  bold; the keys table's fingerprint column is correctly sized; the install
+  screen shows the whole public key wrapped (never silently truncated) with
+  a copyable placeholder command; the exec view gains `Tab` to move focus to
+  the output so `j/k`/`g/G` scroll it; empty states explain the next key;
+  action outcomes that end back at the fleet (a refused connect, exec on an
+  offline host) now surface on the fleet's own message line.
 
 - `make build` now stamps the binary with `git describe` (`kay v0.3.0` on a
   tag, `v0.3.0-2-gabc1234-dirty` off one); release builds keep their
@@ -52,6 +106,23 @@ extractable widgets; and a `?` help overlay plus fleet drill-in round out the UX
   `Columns`, `ColumnCount`, `HumanBytes`, `HumanDuration` moved out of the
   dashboard so the toolkit stays UI-agnostic and reusable (domain colouring stays
   in the dashboard).
+- **Persistent fleet connections** — `kay fleet` now keeps one long-lived,
+  self-healing SSH connection per host and reuses it for every refresh, instead
+  of dialing a brand-new connection each tick. Reusing the transport skips the
+  KEX + public-key-auth handshake on all but the first connect, which cuts CPU,
+  network round-trips, and — most visibly on the server — the connection churn
+  that spams `auth.log` and pressures sshd's `MaxStartups`. A shared dial cap
+  bounds concurrent connects so a large fleet's cold start can't self-throttle,
+  and reconnects use exponential backoff with jitter. Drilling into a host now
+  **reuses** the connection the fleet already established (no second handshake),
+  and the drilled-in dashboard inherits the connection's self-healing. New
+  `internal/sshx` types `Pool` and `Managed` implement this, stdlib-only.
+
+- **Responsive startup** — the dashboard's first metric collection now runs
+  asynchronously behind a "connecting…" screen instead of blocking, and both the
+  dashboard and `kay fleet` ignore input (except quit) until the first data
+  arrives. Keys pressed during the initial 1–3 s connect no longer queue up and
+  fire when the view appears.
 
 ### Fixed
 
@@ -116,26 +187,6 @@ extractable widgets; and a `?` help overlay plus fleet drill-in round out the UX
 - **Vim-friendly keys** — the dashboard is consistent across every tab and
   overlay: `h/j/k/l` to move, `g/G` for ends, `H`/`L` to switch tabs, and
   `Esc`/`q` to back out.
-
-### Changed
-
-- **Persistent fleet connections** — `kay fleet` now keeps one long-lived,
-  self-healing SSH connection per host and reuses it for every refresh, instead
-  of dialing a brand-new connection each tick. Reusing the transport skips the
-  KEX + public-key-auth handshake on all but the first connect, which cuts CPU,
-  network round-trips, and — most visibly on the server — the connection churn
-  that spams `auth.log` and pressures sshd's `MaxStartups`. A shared dial cap
-  bounds concurrent connects so a large fleet's cold start can't self-throttle,
-  and reconnects use exponential backoff with jitter. Drilling into a host now
-  **reuses** the connection the fleet already established (no second handshake),
-  and the drilled-in dashboard inherits the connection's self-healing. New
-  `internal/sshx` types `Pool` and `Managed` implement this, stdlib-only.
-
-- **Responsive startup** — the dashboard's first metric collection now runs
-  asynchronously behind a "connecting…" screen instead of blocking, and both the
-  dashboard and `kay fleet` ignore input (except quit) until the first data
-  arrives. Keys pressed during the initial 1–3 s connect no longer queue up and
-  fire when the view appears.
 
 ## [0.1.2] - 2026-07-01
 
@@ -262,7 +313,8 @@ Initial release.
 - Public-key authentication only (password used solely for assisted install);
   no telemetry.
 
-[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Wigata-Intech/kay/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Wigata-Intech/kay/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/Wigata-Intech/kay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Wigata-Intech/kay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/Wigata-Intech/kay/compare/v0.1.1...v0.1.2

@@ -196,6 +196,22 @@ func (s *Store) AddServer(srv Server) error {
 	return nil
 }
 
+// RemoveKey deletes a key by name, refusing while any server references it.
+func (s *Store) RemoveKey(name string) error {
+	for i := range s.Servers {
+		if s.Servers[i].KeyName == name {
+			return fmt.Errorf("key %q is used by server %q", name, s.Servers[i].Alias)
+		}
+	}
+	for i := range s.Keys {
+		if s.Keys[i].Name == name {
+			s.Keys = append(s.Keys[:i], s.Keys[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("no key named %q", name)
+}
+
 // RemoveServer deletes a server by alias.
 func (s *Store) RemoveServer(alias string) error {
 	for i := range s.Servers {

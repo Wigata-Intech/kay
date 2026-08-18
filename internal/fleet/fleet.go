@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,27 @@ type Options struct {
 	Interval  time.Duration
 	Color     string
 	Anonymize bool // mask aliases/hosts (for demos/screenshots)
+
+	// ConsoleKeys are runes RunView returns to the caller (as Selection.Key,
+	// with the highlighted host) instead of handling itself. Registered keys
+	// take precedence over the fleet's own bindings, except ? and Enter —
+	// and while the help overlay is open, any key only closes it.
+	// Empty for the standalone `kay fleet` paths.
+	ConsoleKeys string
+	// Interrupt, when non-nil, makes RunView return Selection.Interrupted as
+	// soon as a value arrives — the console uses it to surface prompts raised
+	// by background dials. Nil (never fires) for the standalone paths.
+	Interrupt <-chan struct{}
+	// FooterHints, when set, replaces the footer key-hint line — the console
+	// supplies a curated line (a handful of hints plus ?) so the footer
+	// never overflows the terminal. Empty keeps the fleet's own footer.
+	FooterHints string
+	// ExtraHelp sections are appended to the ? overlay.
+	ExtraHelp []tui.HelpSection
+	// Status seeds the view's transient message line — shown in place of the
+	// footer until the first keypress. The console uses it to surface the
+	// outcome of an action that ended outside the fleet frame.
+	Status string
 }
 
 type hostState struct {
@@ -75,25 +97,32 @@ func (c managedConn) Err() error        { return c.m.Err() }
 
 // fleetView holds the mutable state of a running fleet overview.
 type fleetView struct {
-	hosts    []Host
-	states   []hostState
-	conns    []collector // one persistent, self-healing connection per host
-	list     tui.List
-	interval time.Duration
-	anon     bool
-	status   string // transient message (e.g. "still connecting"), cleared on next key
-	help     bool   // true shows the key-binding overlay
-	results  chan hostUpdate
-	inflight int // hosts still collecting in the current round
+	hosts       []Host
+	states      []hostState
+	conns       []collector // one persistent, self-healing connection per host
+	list        tui.List
+	interval    time.Duration
+	anon        bool
+	status      string // transient message (e.g. "still connecting"), cleared on next key
+	help        bool   // true shows the key-binding overlay
+	results     chan hostUpdate
+	inflight    int               // hosts still collecting in the current round
+	consoleKeys string            // runes handed back to the caller (Options.ConsoleKeys)
+	interrupt   <-chan struct{}   // yields the loop to the caller (Options.Interrupt)
+	hints       string            // footer additions (Options.ExtraHints)
+	extraHelp   []tui.HelpSection // ? overlay additions (Options.ExtraHelp)
 }
 
-// Selection is the host a user chose to drill into, together with its live
-// persistent connection so the dashboard can reuse it — running its metrics over
-// the same transport — instead of opening a second one. The connection keeps
-// self-healing in the background, so the dashboard needs no separate redial.
+// Selection is what ended a RunView loop, in one of three shapes: a drill-in
+// (Enter on a ready host — Client is its live persistent connection, so the
+// dashboard reuses the transport instead of opening a second one), a console
+// key (Key is the registered rune, Host the highlighted host, Client nil), or
+// an interrupt (Interrupted true, everything else zero).
 type Selection struct {
-	Host   Host
-	Client metrics.Runner
+	Host        Host
+	Client      metrics.Runner
+	Key         rune
+	Interrupted bool
 }
 
 // Run shows the fleet overview standalone: it owns the terminal and input for the
@@ -182,12 +211,17 @@ func (s *Session) RunView(scr Screen, events <-chan tui.Event, opts Options) (*S
 		opts.Interval = 5 * time.Second
 	}
 	v := &fleetView{
-		hosts:    s.hosts,
-		states:   make([]hostState, len(s.hosts)),
-		conns:    s.conns,
-		interval: opts.Interval,
-		anon:     opts.Anonymize,
-		results:  make(chan hostUpdate, len(s.hosts)), // buffered so no host goroutine blocks
+		hosts:       s.hosts,
+		states:      make([]hostState, len(s.hosts)),
+		conns:       s.conns,
+		interval:    opts.Interval,
+		anon:        opts.Anonymize,
+		results:     make(chan hostUpdate, len(s.hosts)), // buffered so no host goroutine blocks
+		consoleKeys: opts.ConsoleKeys,
+		interrupt:   opts.Interrupt,
+		hints:       opts.FooterHints,
+		extraHelp:   opts.ExtraHelp,
+		status:      opts.Status,
 	}
 
 	ticker := time.NewTicker(v.interval)
@@ -220,10 +254,10 @@ func (v *fleetView) loop(scr Screen, events <-chan tui.Event, tick <-chan time.T
 	draw := func() {
 		w, h := scr.Size()
 		if v.help {
-			scr.Draw(renderFleetHelp(w, h))
+			scr.Draw(renderFleetHelp(v.extraHelp, w, h))
 			return
 		}
-		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, v.status, w, h, v.anon))
+		scr.Draw(render(v.hosts, v.states, &v.list, v.interval, v.status, v.hints, w, h, v.anon))
 	}
 	draw()
 
@@ -240,6 +274,8 @@ func (v *fleetView) loop(scr Screen, events <-chan tui.Event, tick <-chan time.T
 				if sel := v.enterHost(); sel != nil {
 					return sel // drill into a ready host's dashboard
 				}
+			case ev.Key == tui.KeyRune && strings.ContainsRune(v.consoleKeys, ev.Rune):
+				return v.consoleKey(ev.Rune)
 			case handleFleetKey(ev, &v.list, &v.interval, ticker, v.trigger):
 				return nil // quit
 			}
@@ -250,8 +286,25 @@ func (v *fleetView) loop(scr Screen, events <-chan tui.Event, tick <-chan time.T
 			draw()
 		case <-tick:
 			v.trigger()
+		case <-v.interrupt: // nil when unset: never fires
+			return &Selection{Interrupted: true}
 		}
 	}
+}
+
+// consoleKey hands a registered key back to the caller, with the highlighted
+// host attached when the fleet has one — and, when that host's persistent
+// connection is ready, the connection itself, so console actions reuse the
+// transport the way drill-in does.
+func (v *fleetView) consoleKey(r rune) *Selection {
+	s := &Selection{Key: r}
+	if i := v.list.Selected; i >= 0 && i < len(v.hosts) {
+		s.Host = v.hosts[i]
+		if c := v.conns[i]; c.State() == sshx.StateReady {
+			s.Client = c
+		}
+	}
+	return s
 }
 
 // enterHost returns the highlighted host with its live connection when it is
@@ -343,7 +396,7 @@ func collectAll(conns []collector) []hostState {
 	return states
 }
 
-func render(hosts []Host, states []hostState, list *tui.List, interval time.Duration, status string, w, h int, anon bool) []string {
+func render(hosts []Host, states []hostState, list *tui.List, interval time.Duration, status, hints string, w, h int, anon bool) []string {
 	if w < 40 || h < 8 {
 		return []string{"", fmt.Sprintf("  terminal too small — need >=40x8, have %dx%d", w, h)}
 	}
@@ -371,8 +424,11 @@ func render(hosts []Host, states []hostState, list *tui.List, interval time.Dura
 	if status != "" {
 		out = append(out, tui.ClampLine(status, cw))
 	} else {
-		out = append(out, tui.Dim(tui.ClampLine(
-			"j/k select · Enter open host · r refresh · +/- interval · ? help · q quit", cw)))
+		hint := hints
+		if hint == "" {
+			hint = "j/k select · Enter open host · r refresh · +/- interval · ? help · q quit"
+		}
+		out = append(out, tui.Dim(tui.ClampLine(hint, cw)))
 	}
 	return tui.ClampAll(out, w, h)
 }
@@ -388,8 +444,9 @@ func fleetHelpSections() []tui.HelpSection {
 	}
 }
 
-// renderFleetHelp draws the full-screen key-binding overlay.
-func renderFleetHelp(w, h int) []string {
+// renderFleetHelp draws the full-screen key-binding overlay, with any
+// caller-supplied sections after the fleet's own.
+func renderFleetHelp(extra []tui.HelpSection, w, h int) []string {
 	if w < 40 || h < 8 {
 		return []string{"", fmt.Sprintf("  terminal too small — need >=40x8, have %dx%d", w, h)}
 	}
@@ -397,8 +454,9 @@ func renderFleetHelp(w, h int) []string {
 	if cw > 120 {
 		cw = 120
 	}
+	sections := append(fleetHelpSections(), extra...)
 	out := []string{tui.Bold(tui.ClampLine("kay fleet · keybindings", cw))}
-	out = append(out, tui.Box("Keybindings", tui.RenderHelp(fleetHelpSections()), cw, h-4)...)
+	out = append(out, tui.Box("Keybindings", tui.RenderHelp(sections), cw, h-4)...)
 	out = append(out, tui.Dim(tui.ClampLine("press any key to close", cw)))
 	return tui.ClampAll(out, w, h)
 }

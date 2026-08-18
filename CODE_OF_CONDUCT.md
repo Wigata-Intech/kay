@@ -12,4 +12,4 @@ on the work, and help make participation a positive experience for everyone.
 Report unacceptable behaviour to **<dhira@wigataintech.com>**. Reports will be handled confidentially.
 
 The full text of the Contributor Covenant 2.1 is available at
-https://www.contributor-covenant.org/version/2/1/code_of_conduct/.
+<https://www.contributor-covenant.org/version/2/1/code_of_conduct/>.

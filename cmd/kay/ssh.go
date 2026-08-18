@@ -34,7 +34,7 @@ func dialWith(ctx context.Context, st *config.Store, srv *config.Server, hostKey
 	if err != nil {
 		return nil, err
 	}
-	signer, err := keys.LoadSigner(k.PrivatePath)
+	signer, err := loadSigner(k.PrivatePath)
 	if err != nil {
 		return nil, err
 	}
@@ -49,14 +49,25 @@ func dialWith(ctx context.Context, st *config.Store, srv *config.Server, hostKey
 	return c, nil
 }
 
+// Prompt seams: the CLI paths keep the terminal prompts; runConsole swaps in
+// modal-backed ones before any dial starts.
+var (
+	confirmHostFn sshx.ConfirmHostFunc = confirmHostTTY
+	loadSigner                         = keys.LoadSigner
+)
+
 // hostKeyPolicy returns kay's host-key verification: trust-on-first-use with a
-// terminal confirmation, pinned to kay's own known_hosts file — or none when
+// confirmation prompt, pinned to kay's own known_hosts file — or none when
 // the user passed --insecure.
 func hostKeyPolicy(st *config.Store, insecure bool) (ssh.HostKeyCallback, error) {
 	if insecure {
 		return sshx.InsecureAcceptAny(), nil
 	}
-	return sshx.TOFU(st.KnownHostsPath(), confirmHostTTY)
+	// Late-bound so a policy built before runConsole swaps the seam still
+	// prompts through the console.
+	return sshx.TOFU(st.KnownHostsPath(), func(h sshx.HostInfo) (bool, error) {
+		return confirmHostFn(h)
+	})
 }
 
 // dialHint turns sshx's staged dial errors into actionable kay messages,
@@ -126,13 +137,15 @@ func (realTerm) GetSize(fd int) (w, h int, err error) { return term.GetSize(fd) 
 
 // shell opens an interactive PTY-backed shell wired to the local terminal.
 func shell(c *sshx.Client) error {
-	return shellWith(c, realTerm{}, os.Stdin, os.Stdout, os.Stderr)
+	return shellWith(c, realTerm{}, os.Stdin, os.Stdin, os.Stdout, os.Stderr)
 }
 
-// shellWith is shell with the terminal and streams injected.
-func shellWith(c *sshx.Client, tio termIO, stdin *os.File, stdout, stderr io.Writer) error {
+// shellWith is shell with the terminal and streams injected: tty is the local
+// terminal used for raw mode and sizing; stdin feeds the remote session (the
+// console diverts it through its input router, the CLI passes the tty itself).
+func shellWith(c *sshx.Client, tio termIO, tty *os.File, stdin io.Reader, stdout, stderr io.Writer) error {
 	cfg := sshx.SessionConfig{Stdin: stdin, Stdout: stdout, Stderr: stderr}
-	fd := int(stdin.Fd())
+	fd := int(tty.Fd())
 	if tio.IsTerminal(fd) {
 		state, err := tio.MakeRaw(fd)
 		if err != nil {

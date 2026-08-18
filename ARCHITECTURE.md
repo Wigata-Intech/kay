@@ -10,9 +10,10 @@ minimal churn — without doing that move now.
 
 Alphabetical (matching how editors and the GitHub UI sort):
 
-```
+```text
 cmd/kay            entrypoint + subcommand dispatch (the application)
 internal/
+├── app            interactive console: view-stack router (bare kay) [app]
 ├── config         persistent JSON store (keys, servers)         [app]
 ├── dashboard      interactive tabbed single-host dashboard      [app]
 ├── fleet          multi-host fleet overview (kay fleet)         [app]
@@ -28,8 +29,9 @@ module github.com/Wigata-Intech/w-tools/x/sshx (extracted from this repo).
 
 Arrows point "depends on". There are no cycles.
 
-```
-cmd/kay ─┬─▶ config
+```text
+cmd/kay ─┬─▶ app ──▶ config, dashboard, fleet, tui
+         ├─▶ config
          ├─▶ dashboard ─┬─▶ config
          │              ├─▶ metrics
          │              └─▶ tui
@@ -42,7 +44,8 @@ cmd/kay ─┬─▶ config
 ```
 
 | Package | Class | Imports (intra-project) | Promotable? |
-|---------|-------|--------------------------|-------------|
+| ------- | ----- | ------------------------ | ----------- |
+| `app` | app | `config`, `dashboard`, `fleet`, `tui` | ✕ application UI |
 | `config` | app | none | ➖ standalone but app-specific |
 | `dashboard` | app | `config`, `metrics`, `tui` | ✕ application UI |
 | `fleet` | app | `config`, `metrics`, `w-tools/x/sshx`, `tui` | ✕ application UI |

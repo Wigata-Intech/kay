@@ -273,7 +273,7 @@ func TestRender(t *testing.T) {
 	t.Run("fits within bounds and shows cells", func(t *testing.T) {
 		var list tui.List
 		const w, h = 100, 20
-		out := render(hosts, states, &list, 5*time.Second, "", w, h, false)
+		out := render(hosts, states, &list, 5*time.Second, "", "", w, h, false)
 		if len(out) > h {
 			t.Fatalf("render produced %d lines, exceeds height %d", len(out), h)
 		}
@@ -292,7 +292,7 @@ func TestRender(t *testing.T) {
 
 	t.Run("too small returns a hint", func(t *testing.T) {
 		var list tui.List
-		out := render(hosts, states, &list, time.Second, "", 20, 4, false)
+		out := render(hosts, states, &list, time.Second, "", "", 20, 4, false)
 		joined := strings.Join(out, "\n")
 		if !strings.Contains(joined, "terminal too small") {
 			t.Errorf("expected too-small hint, got %q", joined)
@@ -302,7 +302,7 @@ func TestRender(t *testing.T) {
 	t.Run("wide terminal clamps content width", func(t *testing.T) {
 		var list tui.List
 		const w, h = 200, 24
-		out := render(hosts, states, &list, time.Second, "", w, h, false)
+		out := render(hosts, states, &list, time.Second, "", "", w, h, false)
 		if len(out) > h {
 			t.Fatalf("render produced %d lines, exceeds height %d", len(out), h)
 		}
@@ -314,9 +314,30 @@ func TestRender(t *testing.T) {
 		}
 	})
 
+	t.Run("no caller hints keeps the standalone footer verbatim", func(t *testing.T) {
+		var list tui.List
+		out := render(hosts, states, &list, time.Second, "", "", 100, 20, false)
+		const want = "j/k select · Enter open host · r refresh · +/- interval · ? help · q quit"
+		if joined := strings.Join(out, "\n"); !strings.Contains(joined, want) {
+			t.Errorf("standalone footer changed: %q", joined)
+		}
+	})
+
+	t.Run("caller hints replace the footer", func(t *testing.T) {
+		var list tui.List
+		out := render(hosts, states, &list, time.Second, "", "a add · ? more", 100, 20, false)
+		joined := strings.Join(out, "\n")
+		if !strings.Contains(joined, "a add · ? more") {
+			t.Errorf("caller hints missing: %q", joined)
+		}
+		if strings.Contains(joined, "r refresh") {
+			t.Errorf("default footer not replaced: %q", joined)
+		}
+	})
+
 	t.Run("a status replaces the key hint", func(t *testing.T) {
 		var list tui.List
-		out := render(hosts, states, &list, time.Second, "host is still connecting", 100, 20, false)
+		out := render(hosts, states, &list, time.Second, "host is still connecting", "", 100, 20, false)
 		joined := strings.Join(out, "\n")
 		if !strings.Contains(joined, "host is still connecting") {
 			t.Errorf("status message not shown: %q", joined)
@@ -327,17 +348,35 @@ func TestRender(t *testing.T) {
 	})
 }
 
-// fakeScreen counts draws; the counter is mutex-guarded because Draw runs in the
-// loop goroutine while the test reads the count.
+// fakeScreen counts draws and records lines; both are mutex-guarded because
+// Draw runs in the loop goroutine while the test reads.
 type fakeScreen struct {
-	w, h int
-	mu   sync.Mutex
-	n    int
+	w, h  int
+	mu    sync.Mutex
+	n     int
+	lines []string
 }
 
 func (s *fakeScreen) Size() (int, int) { return s.w, s.h }
-func (s *fakeScreen) Draw([]string)    { s.mu.Lock(); s.n++; s.mu.Unlock() }
-func (s *fakeScreen) draws() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
+func (s *fakeScreen) Draw(lines []string) {
+	s.mu.Lock()
+	s.n++
+	s.lines = append(s.lines, lines...)
+	s.mu.Unlock()
+}
+func (s *fakeScreen) draws() int { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
+
+// saw reports whether any drawn line contained sub.
+func (s *fakeScreen) saw(sub string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range s.lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}
 
 // newFleetView builds a one-host view backed by the given connection.
 func newFleetView(c collector) *fleetView {
@@ -416,6 +455,111 @@ func TestFleetLoopEnterNotReady(t *testing.T) {
 	ev <- tui.Event{Rune: 'q'}
 	if sel := <-done; sel != nil {
 		t.Errorf("Enter on a not-ready host should not drill, got %v", sel)
+	}
+}
+
+func TestFleetLoopConsoleKey(t *testing.T) {
+	t.Run("registered key returns with the highlighted host", func(t *testing.T) {
+		v := newFleetView(&fakeConn{state: sshx.StateConnecting})
+		v.consoleKeys = "aedK"
+		scr := &fakeScreen{w: 100, h: 30}
+		ev, _, ticker, done := startFleetLoop(v, scr)
+		defer ticker.Stop()
+
+		ev <- tui.Event{Rune: 'e'}
+		sel := <-done
+		if sel == nil || sel.Key != 'e' {
+			t.Fatalf("loop returned %+v, want Key 'e'", sel)
+		}
+		if sel.Host.Server.Alias != "a" {
+			t.Errorf("console key host = %q, want the highlighted host", sel.Host.Server.Alias)
+		}
+		if sel.Client != nil {
+			t.Error("console key selection should carry no connection")
+		}
+	})
+
+	t.Run("a ready host's connection rides along", func(t *testing.T) {
+		v := newFleetView(&fakeConn{state: sshx.StateReady})
+		v.consoleKeys = "x"
+		scr := &fakeScreen{w: 100, h: 30}
+		ev, _, ticker, done := startFleetLoop(v, scr)
+		defer ticker.Stop()
+
+		ev <- tui.Event{Rune: 'x'}
+		sel := <-done
+		if sel == nil || sel.Key != 'x' || sel.Client == nil {
+			t.Errorf("loop returned %+v, want Key 'x' with the live connection", sel)
+		}
+	})
+
+	t.Run("registered key on an empty fleet carries a zero host", func(t *testing.T) {
+		v := newFleetView(&fakeConn{state: sshx.StateConnecting})
+		v.hosts, v.conns, v.states = nil, nil, nil
+		v.consoleKeys = "a"
+		scr := &fakeScreen{w: 100, h: 30}
+		ev, _, ticker, done := startFleetLoop(v, scr)
+		defer ticker.Stop()
+
+		ev <- tui.Event{Rune: 'a'}
+		sel := <-done
+		if sel == nil || sel.Key != 'a' || sel.Host.Server.Alias != "" {
+			t.Errorf("loop returned %+v, want Key 'a' with a zero host", sel)
+		}
+	})
+
+	t.Run("unregistered runes stay in the fleet", func(t *testing.T) {
+		v := newFleetView(&fakeConn{state: sshx.StateConnecting})
+		v.consoleKeys = "a"
+		scr := &fakeScreen{w: 100, h: 30}
+		ev, _, ticker, done := startFleetLoop(v, scr)
+		defer ticker.Stop()
+
+		ev <- tui.Event{Rune: 'z'} // ignored
+		ev <- tui.Event{Rune: 'q'}
+		if sel := <-done; sel != nil {
+			t.Errorf("loop returned %+v, want nil (quit)", sel)
+		}
+	})
+}
+
+func TestRunViewSeedsStatus(t *testing.T) {
+	// A seeded status must show on the first frame and clear on the first key
+	// — the console hands action outcomes to the fleet frame this way.
+	sess := NewSession(nil)
+	defer sess.Close()
+	scr := &fakeScreen{w: 100, h: 30}
+	events := make(chan tui.Event, 2)
+	done := make(chan *Selection, 1)
+	go func() {
+		sel, _ := sess.RunView(scr, events, Options{Status: "dial refused"})
+		done <- sel
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !scr.saw("dial refused") {
+		time.Sleep(time.Millisecond)
+	}
+	if !scr.saw("dial refused") {
+		t.Error("seeded status never drawn")
+	}
+	events <- tui.Event{Rune: 'q'}
+	if sel := <-done; sel != nil {
+		t.Errorf("RunView returned %+v, want quit", sel)
+	}
+}
+
+func TestFleetLoopInterrupt(t *testing.T) {
+	v := newFleetView(&fakeConn{state: sshx.StateConnecting})
+	interrupt := make(chan struct{}, 1)
+	v.interrupt = interrupt
+	scr := &fakeScreen{w: 100, h: 30}
+	_, _, ticker, done := startFleetLoop(v, scr)
+	defer ticker.Stop()
+
+	interrupt <- struct{}{}
+	sel := <-done
+	if sel == nil || !sel.Interrupted {
+		t.Errorf("loop returned %+v, want Interrupted", sel)
 	}
 }
 
@@ -549,12 +693,22 @@ func TestNewSessionWiresConns(t *testing.T) {
 
 func TestRenderFleetHelp(t *testing.T) {
 	noColor(t)
-	out := strings.Join(renderFleetHelp(100, 30), "\n")
+	out := strings.Join(renderFleetHelp(nil, 100, 30), "\n")
 	for _, want := range []string{"Keybindings", "open host dashboard", "quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("fleet help missing %q:\n%s", want, out)
 		}
 	}
+
+	t.Run("extra sections are appended", func(t *testing.T) {
+		extra := []tui.HelpSection{{Title: "Console", Keys: [][2]string{{"a", "add server"}}}}
+		out := strings.Join(renderFleetHelp(extra, 100, 30), "\n")
+		for _, want := range []string{"Console", "add server"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("fleet help missing %q", want)
+			}
+		}
+	})
 }
 
 func TestFleetHelpToggle(t *testing.T) {

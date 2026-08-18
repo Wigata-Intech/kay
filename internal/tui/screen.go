@@ -70,6 +70,27 @@ func (s *Screen) Draw(lines []string) {
 
 func (s *Screen) write(str string) { _, _ = s.out.WriteString(str) }
 
+// Suspend leaves the alternate screen and restores the terminal so another
+// program (an interactive SSH shell) can own it. Pair with Resume.
+func (s *Screen) Suspend() {
+	if s.raw != nil {
+		_ = term.Restore(s.fd, s.raw)
+		s.raw = nil
+	}
+	s.write(showCursor + leaveAlt)
+}
+
+// Resume re-enters raw mode and the alternate screen after a Suspend.
+func (s *Screen) Resume() error {
+	st, err := term.MakeRaw(s.fd)
+	if err != nil {
+		return err
+	}
+	s.raw = st
+	s.write(enterAlt + hideCursor)
+	return nil
+}
+
 // Close restores the terminal. Safe to call more than once.
 func (s *Screen) Close() {
 	if s.cleaned {

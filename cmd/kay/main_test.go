@@ -3,11 +3,14 @@
 package main
 
 import (
+	"io"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wigata-Intech/kay/internal/config"
+	"github.com/Wigata-Intech/kay/internal/tui"
 )
 
 // exitPanic carries the code passed to the stubbed exit seam.
@@ -52,6 +55,7 @@ func TestMainDispatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("KAY_HOME", t.TempDir())
+			setIsTerminal(t, false) // pin the no-TTY dispatch: bare `kay` on a TTY opens the console
 			var code int
 			var exited bool
 			_ = captureStdout(t, func() { code, exited = runMain(t, tt.args...) })
@@ -61,6 +65,139 @@ func TestMainDispatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInputRouter(t *testing.T) {
+	newRouter := func(t *testing.T) (*inputRouter, *os.File) {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		prev := stdinFile
+		stdinFile = r
+		t.Cleanup(func() { stdinFile = prev; _ = w.Close(); _ = r.Close() })
+		return startInputRouter(), w
+	}
+
+	t.Run("decodes UI events and quits on stdin EOF", func(t *testing.T) {
+		router, w := newRouter(t)
+		if _, err := w.Write([]byte("q")); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		ev := <-router.events
+		if ev.Rune != 'q' {
+			t.Errorf("event = %+v, want the q rune", ev)
+		}
+		_ = w.Close() // EOF must deliver a final quit, like a reader error
+		select {
+		case ev := <-router.events:
+			if ev.Type != tui.EventQuit {
+				t.Errorf("event after EOF = %+v, want EventQuit", ev)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no quit event after stdin EOF")
+		}
+	})
+
+	t.Run("divert with buffered input at stdin EOF drains cleanly", func(t *testing.T) {
+		router, w := newRouter(t)
+		if _, err := w.Write([]byte(strings.Repeat("a", 20))); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && len(router.events) < cap(router.events) {
+			time.Sleep(time.Millisecond)
+		}
+		if _, err := w.Write([]byte("b")); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		for time.Now().Before(deadline) && len(router.chunks) == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		_ = w.Close()                     // chunks closes behind the buffered b
+		time.Sleep(20 * time.Millisecond) // let the reader observe EOF and close
+		_, pw := io.Pipe()
+		done := make(chan struct{})
+		go func() { router.divertTo(pw); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("divertTo hung on a closed chunk stream")
+		}
+	})
+
+	t.Run("divert wins even when the UI is not draining", func(t *testing.T) {
+		router, w := newRouter(t)
+		// Overfill the event buffer so the route loop blocks on delivery
+		// (confirmed by the buffer reaching capacity) before diverting.
+		if _, err := w.Write([]byte(strings.Repeat("a", 20))); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && len(router.events) < cap(router.events) {
+			time.Sleep(time.Millisecond)
+		}
+		// A separate write lands as its own chunk behind the blocked route
+		// loop — it must be dropped by the switch, not fed to the shell.
+		if _, err := w.Write([]byte("b")); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		for time.Now().Before(deadline) && len(router.chunks) == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		pr, pw := io.Pipe()
+		done := make(chan struct{})
+		go func() { router.divertTo(pw); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("divertTo deadlocked against a full event buffer")
+		}
+		// The switch drain may eat a write that races the handoff (that IS the
+		// typed-ahead drop), so keep writing z until one flows through raw.
+		stop := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _ = w.Write([]byte("z"))
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+		}()
+		// Typed-ahead is dropped with the switch: the first raw byte must be
+		// z, never the pre-divert b.
+		buf := make([]byte, 1)
+		if _, err := pr.Read(buf); err != nil || buf[0] != 'z' {
+			t.Fatalf("diverted read = %q, %v; want z", buf, err)
+		}
+		close(stop)
+		_ = pw.Close() // prod ordering: unblock any raw write, then un-divert
+		router.divertTo(nil)
+		if _, err := w.Write([]byte("k")); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		// The switch back drained the stale a events; stray z stragglers are
+		// our own noise, but no a may precede the fresh keystroke.
+		deadline = time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			select {
+			case ev := <-router.events:
+				switch ev.Rune {
+				case 'k':
+					return
+				case 'a':
+					t.Fatal("stale pre-divert event replayed after un-divert")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("events never resumed after un-divert")
+			}
+		}
+		t.Fatal("fresh keystroke never arrived")
+	})
 }
 
 // setStdin scripts the interactive selection prompt.

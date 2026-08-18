@@ -4,16 +4,17 @@ about: Report a problem with kay
 labels: bug
 ---
 
-**What happened**
+#### What happened
 
-**Steps to reproduce**
+#### Steps to reproduce
 
 1.
 2.
 
-**What you expected instead**
+#### What you expected instead
 
-**Environment**
+#### Environment
+
 - kay version / commit:
 - Client OS (macOS / Linux / Windows):
 - Go version (`go version`):

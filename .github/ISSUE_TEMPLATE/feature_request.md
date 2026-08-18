@@ -4,11 +4,12 @@ about: Suggest an idea for kay
 labels: enhancement
 ---
 
-**Problem / use case**
+#### Problem / use case
+
 What are you trying to do, and what makes it hard today?
 
-**Proposed solution**
+#### Proposed solution
 
-**Alternatives considered**
+#### Alternatives considered
 
-**Additional context**
+#### Additional context
